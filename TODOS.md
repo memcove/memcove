@@ -42,13 +42,3 @@ Deferred work, captured with enough context to pick up cold.
   the grace period + TOCTOU re-check already make a wrongful delete require a *correlated,
   persistent* flake across two sweeps AND the live re-check.
 - **Depends on:** nothing.
-
-## Registry: connection pooling
-- **What:** Introduce a Postgres connection pool (e.g. `psycopg_pool`) instead of opening a fresh
-  connection per registry op.
-- **Why:** `core/registry.py:41` (`_conn()`, `autocommit=True`) opens and tears down a connection
-  on every call. Pre-existing, but the reconciler + synchronous read-repair add more per-op
-  connections, raising churn.
-- **Context:** Pure tech debt, no behavior change. Not introduced by M5 write-atomicity work, so
-  it stays out of that scope. Straightforward swap behind the existing `_conn()` seam.
-- **Depends on:** nothing; can be done any time.

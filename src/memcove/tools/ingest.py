@@ -11,7 +11,7 @@ from memcove.core.config import get_settings
 from memcove.core.errors import IngestError
 from memcove.core.models import MemoryObject, SourceKind, UploadTicket
 from memcove.core.naming import validate_label
-from memcove.tools.objects import describe_object
+from memcove.tools.objects import describe_object, pending_object
 
 
 def _check_s3_ingest_allowed(uri: str, settings) -> None:
@@ -91,7 +91,7 @@ def ingest_object(
     table, kind, ref = _table_from_source(source, tenant)
 
     catalog.write_arrow(tenant, label, table, mode=mode)
-    registry.record_object(
+    ok = registry.record_object_guarded(
         tenant,
         label,
         table_ident=f"{get_settings().trino_catalog}.{tenant}.{label}",
@@ -99,6 +99,11 @@ def ingest_object(
         source_ref=ref,
         tags=tags or [],
     )
+    if not ok:
+        # Data is committed and queryable; only the registry write failed. Return a
+        # metadata_pending response built from values in hand (the drift signal is
+        # already logged and the reconciler / read-repair will backfill).
+        return pending_object(tenant, label, source=kind, source_ref=ref, tags=tags or [])
     return describe_object(tenant, label)
 
 

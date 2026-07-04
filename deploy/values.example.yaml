@@ -27,7 +27,10 @@ memcove:
     warehouse: s3://my-memcove-warehouse/
     catalogName: memcove
 
-  # Trino read/derive/export engine
+  # Trino read/derive/export engine.
+  # REQUIRES Trino server >= 431: derive's atomic replace uses the Iceberg connector's
+  # CREATE OR REPLACE TABLE, which does not exist on older servers. Bring-your-own Trino
+  # must be 431+ or derive replace will fail.
   trino:
     host: trino.internal
     port: 443

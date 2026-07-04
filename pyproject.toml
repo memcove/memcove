@@ -30,6 +30,7 @@ dev = [
 [project.scripts]
 memcove-server = "memcove.server:main"
 memcove-flight = "memcove.data_plane.flight_server:main"
+memcove-reconcile = "memcove.reconciler:main"
 
 [build-system]
 requires = ["hatchling"]

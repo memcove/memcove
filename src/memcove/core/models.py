@@ -17,6 +17,11 @@ class SourceKind(str, Enum):
     UPLOAD = "upload_handle"
     STREAM = "stream"
     DERIVED = "derived"
+    # A row the reconciler (or synchronous read-repair) backfilled for an Iceberg
+    # table that had no registry row — e.g. after a crash between the data write and
+    # the registry write. Marks that user metadata (tags/producing_sql/lineage) was
+    # lost and should be re-supplied by re-running the producing operation.
+    RECONCILED = "reconciled"
 
 
 class ColumnSchema(BaseModel):
@@ -50,6 +55,11 @@ class MemoryObject(BaseModel):
     lineage: Lineage = Field(default_factory=Lineage)
     created_at: datetime | None = None
     updated_at: datetime | None = None
+    # True when the data write committed but the registry metadata write failed. The
+    # object is queryable, but tags/producing_sql/lineage may be missing until a
+    # reconciler sweep or a re-run repairs them. Built from values in hand, so the
+    # response does not depend on re-reading the registry that just failed.
+    metadata_pending: bool = False
 
     model_config = {"populate_by_name": True}
 

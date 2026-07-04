@@ -99,14 +99,19 @@ class MemcoveFlightServer(fl.FlightServerBase):
         # Buffer the streamed batches, then write once (single Iceberg commit).
         table = reader.read_all()
         rows = catalog.write_arrow(tenant, name, table, mode=mode)
-        registry.record_object(
+        ok = registry.record_object_guarded(
             tenant,
             name,
             table_ident=f"{get_settings().trino_catalog}.{tenant}.{name}",
             source=SourceKind.STREAM.value,
             source_ref="flight",
         )
-        logger.info("flight ingest: %s.%s += %d rows (mode=%s)", tenant, name, rows, mode)
+        # Data is committed either way; on a registry failure the guarded write has
+        # already logged the drift signal for the reconciler / read-repair to backfill.
+        logger.info(
+            "flight ingest: %s.%s += %d rows (mode=%s, metadata_pending=%s)",
+            tenant, name, rows, mode, not ok,
+        )
 
 
 def serve() -> None:

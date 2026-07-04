@@ -4,6 +4,34 @@ All notable changes to Memcove are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 semantic versioning once it reaches 1.0.
 
+## [0.3.0] - 2026-07-05
+
+Write atomicity (M5). A crash or concurrent reader can no longer see a half-written
+object, and the registry now self-heals when it drifts from the Iceberg catalog.
+
+### Added
+- **Atomic full-table replace** — `mode=replace` uses each engine's native atomic
+  swap (PyIceberg `overwrite()` for ingest/Flight, Trino `CREATE OR REPLACE TABLE`
+  for derive) instead of drop-then-create. A concurrent reader sees the old rows or
+  the new rows, never a missing table, and a mid-write crash no longer loses data.
+- **Schema-compatibility guard** — replace and append reject a changed shape
+  (added/removed/retyped column) with `SchemaMismatchError` rather than silently
+  evolving it, so downstream SQL never breaks. `forget()` then `create()` to reshape.
+- **Guarded registry write** — the object row and its lineage commit in one
+  transaction; if the registry write fails after the data is committed, the tool
+  returns a `metadata_pending` object and logs the drift instead of failing the write.
+- **Synchronous read-repair** — `describe_object` on a registry miss backfills a
+  `reconciled` row inline when the table exists, so an orphaned object becomes
+  visible on the next read (the guarantee holds before the M7 reconcile cron).
+- **Reconciler** (`memcove-reconcile`) — sweeps registry vs catalog and repairs both
+  directions. Deletion is deliberately timid: fail-safe on an empty listing (never
+  wipes a tenant on a transient catalog hiccup), a deletion cap with an absolute
+  floor, a two-sweep grace period, and a live re-check just before deleting.
+
+### Changed
+- Dev/CI Trino pinned to `431` (the minimum for `CREATE OR REPLACE TABLE` on the
+  Iceberg connector); operators bringing their own Trino need `>= 431`.
+
 ## [0.2.0] - 2026-07-04
 
 The agent SQL gateway security core and its configuration seams. Every tenant

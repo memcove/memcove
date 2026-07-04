@@ -63,7 +63,9 @@ services:
       CATALOG_S3_PATH__STYLE__ACCESS: "true"
 
   trino:
-    image: trinodb/trino:latest
+    # Pinned (not :latest) for reproducible builds. Must be >= 431: derive's atomic
+    # replace uses the Iceberg connector's CREATE OR REPLACE TABLE, added in Trino 431.
+    image: trinodb/trino:431
     container_name: memcove-trino
     ports:
       - "8080:8080"

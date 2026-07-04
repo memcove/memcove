@@ -35,5 +35,9 @@ See [Resources](resources.md).
 ## How to read these pages
 
 Each tool lists its **parameters** (name, type, default, and the description the agent
-sees) and its **return shape**. Datasets are always referenced by their bare name; the
-tenant is implicit (from the request), never a parameter.
+sees) and its **return shape**.
+
+!!! info "The tenant is implicit"
+    Datasets are always referenced by their **bare name** in SQL and tool arguments. The
+    tenant is never a parameter — it comes from the request headers and scopes every call
+    automatically. See [Connect an MCP client](../getting-started/connecting.md).

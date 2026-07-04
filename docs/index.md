@@ -42,6 +42,39 @@ caller's private tenant namespace.
 - **Lineage** — `derive_dataset` records which datasets and SQL produced a result, so
   you can audit provenance with `inspect_dataset`.
 
+## When to use Memcove
+
+Memcove is a **structured-data memory and SQL compute layer** for agents. It is not a
+conversational-memory or vector-search product — knowing the difference saves you from
+reaching for the wrong tool.
+
+!!! success "Memcove is a good fit when…"
+    - An agent produces or receives **tabular data** (dataframes, query results, uploaded
+      files) it needs to keep across turns or share with other agents.
+    - You want agents to **compute with SQL** — joins, rollups, filters — instead of
+      stuffing tables into the context window.
+    - Data is **too big for the context window**, or must **persist** beyond a single
+      conversation.
+    - You need **multi-tenant isolation** for structured data across many agents or users.
+    - You have **heterogeneous sources** that can export parquet and want one agent-safe
+      query layer over them.
+    - You value **deterministic, auditable** data operations — lineage, capped previews,
+      and exportable files.
+
+!!! failure "Reach for something else when…"
+    - You need **semantic / conversational memory** or **vector search** (embeddings,
+      RAG). That is a different tool (mem0, Letta, a vector database). Memcove stores
+      structured tables and runs SQL — it is not RAG memory.
+    - Your data isn't **tabular** — raw blobs, images, long free text. Memcove is
+      columnar and SQL-oriented.
+    - You need **transactional, row-level updates** (OLTP). Memcove is an analytical
+      lakehouse: agents write via create/replace/append and read via read-only SQL, not a
+      mutable application database.
+    - You need **sub-millisecond key-value lookups** or a cache. Trino over Iceberg is an
+      analytical engine, not a low-latency KV store.
+    - The data is **tiny and transient** and fits fine in the prompt — just keep it in
+      context.
+
 ## Where to go next
 
 <div class="grid cards" markdown>

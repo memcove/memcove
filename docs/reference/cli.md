@@ -30,6 +30,8 @@ Only needed if you use the [streaming tools](../tools/streaming.md)
 
 ## Running both
 
-In production run them as two separate deployments/processes so they scale independently.
-Clients dial the Flight server at `MEMCOVE_FLIGHT_ADVERTISE_URI` (what the control plane
-advertises in its tickets), which may differ from the bind address.
+!!! note "Run them as separate processes"
+    In production, run `memcove-server` and `memcove-flight` as two separate
+    deployments/processes so they scale independently. Clients dial the Flight server at
+    `MEMCOVE_FLIGHT_ADVERTISE_URI` (what the control plane advertises in its tickets),
+    which may differ from the bind address.

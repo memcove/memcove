@@ -3,6 +3,10 @@
 Read datasets directly, audit their provenance, list what you have, and discover shared
 reference data — all without writing SQL.
 
+!!! tip "Start with `list_memory`"
+    Before querying or re-ingesting, list what you already have — it avoids duplicating
+    data and tells you the exact names to reference in SQL.
+
 ## `recall_dataset`
 
 Read a named dataset directly, without writing SQL.

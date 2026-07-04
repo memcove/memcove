@@ -102,5 +102,8 @@ Returns `{uri, presigned_url, format, row_count, size_bytes, expires_in_seconds}
 | Inspect | `inspect_dataset` | Postgres registry + Iceberg schema |
 | Export | `export_dataset` | Trino → S3 + presigned URL |
 
-For very large data, swap the inline/preview steps for the streaming data plane —
-[`open_ingest_stream` and `stream_dataset`](../tools/streaming.md).
+!!! tip "Scaling up"
+    For very large data, swap the inline/preview steps for the streaming data plane —
+    [`open_ingest_stream` and `stream_dataset`](../tools/streaming.md) — so the bytes move
+    over Arrow Flight instead of through tool calls. For a parquet file you already have,
+    use [`start_large_upload`](../tools/storing.md#start_large_upload).

@@ -9,6 +9,7 @@ import uuid
 import pyarrow.csv as pacsv
 
 from memcove.core import storage, trino_client
+from memcove.core.audit import audit
 from memcove.core.config import get_settings
 from memcove.core.errors import MemcoveError
 from memcove.core.models import ArtifactRef
@@ -35,10 +36,13 @@ def export_artifact(
     if label:
         base = validate_label(label)
         sql = f"SELECT * FROM {base}"
-    guard = validate_select(sql, tenant_ns=tenant, catalog=settings.trino_catalog)
+    guard = validate_select(
+        sql, tenant_ns=tenant, catalog=settings.trino_catalog,
+        shared_schemas=settings.shared_schemas,
+    )
 
     capped = f"SELECT * FROM (\n{guard.sql}\n) AS _e LIMIT {settings.export_row_cap}"
-    table = trino_client.execute_arrow(capped)
+    table = trino_client.execute_arrow(capped, run_as=tenant)
 
     key = f"exports/{tenant}/{base}-{uuid.uuid4().hex}.{_EXT[fmt]}"
     bucket = settings.artifacts_bucket
@@ -57,6 +61,7 @@ def export_artifact(
         content_type = "application/json"
 
     _ = content_type  # reserved for future metadata
+    audit("export", tenant=tenant, fmt=fmt, rows=table.num_rows, key=key)
     return ArtifactRef(
         uri=storage.s3_uri(bucket, key),
         presigned_url=storage.presign_get(bucket, key),

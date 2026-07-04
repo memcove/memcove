@@ -72,6 +72,64 @@ def test_allows_own_namespace_qualified():
     assert g.referenced_labels == ["events"]
 
 
+# --------------------------------------------------------------- shared reference plane
+
+SHARED = ["ref_market"]
+
+
+def test_allows_shared_schema_read():
+    g = validate_select(
+        "SELECT * FROM ref_market.prices", TENANT, CAT, shared_schemas=SHARED
+    )
+    # A shared schema resolves to ITSELF, never rewritten to the caller's namespace.
+    assert "ref_market" in g.sql and "prices" in g.sql
+    assert "t_acme" not in g.sql
+
+
+def test_allows_join_private_scratch_with_shared_plane():
+    g = validate_select(
+        "SELECT p.px FROM my_scratch s JOIN ref_market.prices p ON s.id = p.id",
+        TENANT,
+        CAT,
+        shared_schemas=SHARED,
+    )
+    assert "t_acme" in g.sql  # private scratch -> caller namespace
+    assert "ref_market" in g.sql  # shared plane -> itself
+
+
+def test_shared_read_rejected_when_plane_not_configured():
+    with pytest.raises(SqlGuardError):
+        validate_select("SELECT * FROM ref_market.prices", TENANT, CAT)
+
+
+def test_write_into_shared_plane_rejected():
+    # Writes never reach the guard as SQL (SELECT-only); a CTAS is rejected regardless.
+    with pytest.raises(SqlGuardError):
+        validate_select(
+            "CREATE TABLE ref_market.x AS SELECT 1", TENANT, CAT, shared_schemas=SHARED
+        )
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT * FROM t_other.secrets",  # cross-tenant read
+        'SELECT * FROM "T_Other".secrets',  # quoted mixed-case must not bypass
+        "SELECT * FROM information_schema.tables",  # metadata enumeration
+        "SELECT * FROM iceberg.information_schema.columns",
+        "SELECT * FROM system.jdbc.tables",  # foreign catalog metadata
+        "SHOW SCHEMAS",  # enumeration verb
+        "SHOW TABLES FROM t_other",
+        "DESCRIBE t_other.secrets",
+        # Polymorphic table function: parses as an empty-name table; fail closed.
+        "SELECT * FROM TABLE(system.query(query => 'select * from t_other.y'))",
+    ],
+)
+def test_rejects_cross_tenant_and_metadata_even_with_shared_plane(sql):
+    with pytest.raises(SqlGuardError):
+        validate_select(sql, TENANT, CAT, shared_schemas=SHARED)
+
+
 def test_wrap_preview_injects_limit():
     g = validate_select("SELECT * FROM events", TENANT, CAT)
     wrapped = wrap_preview(g.sql, 100)

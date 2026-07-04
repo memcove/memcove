@@ -53,26 +53,34 @@ class MemcoveFlightServer(fl.FlightServerBase):
         op = cmd.get("op")
         if op == "read":
             name = validate_label(cmd["name"])
-            guard = validate_select(f"SELECT * FROM {name}", tenant, settings.trino_catalog)
+            guard = validate_select(
+                f"SELECT * FROM {name}", tenant, settings.trino_catalog,
+                shared_schemas=settings.shared_schemas,
+            )
         elif op == "query":
-            guard = validate_select(cmd["sql"], tenant, settings.trino_catalog)
+            guard = validate_select(
+                cmd["sql"], tenant, settings.trino_catalog,
+                shared_schemas=settings.shared_schemas,
+            )
         else:
             raise fl.FlightError(f"unsupported DoGet op {op!r}")
-        return trino_client.execute_arrow(guard.sql)
+        return trino_client.execute_arrow(guard.sql, run_as=tenant)
 
     def do_get(self, context, ticket: fl.Ticket):
         try:
-            cmd = tickets.decode(ticket.ticket)
+            cmd = tickets.verify(ticket.ticket)
             table = self._result_table(cmd)
         except Exception as exc:  # noqa: BLE001
             raise fl.FlightError(str(exc)) from exc
         return fl.RecordBatchStream(table)
 
     def get_flight_info(self, context, descriptor: fl.FlightDescriptor):
-        cmd = tickets.decode(descriptor.command)
+        cmd = tickets.verify(descriptor.command)
         table = self._result_table(cmd)
         endpoint = fl.FlightEndpoint(
-            fl.Ticket(tickets.encode(cmd)),
+            # Re-issue a SIGNED ticket — do_get verifies signatures and would reject
+            # an unsigned one, breaking the get_flight_info -> do_get handshake.
+            fl.Ticket(tickets.sign(cmd)),
             [fl.Location.for_grpc_tcp("localhost", get_settings().flight_port)],
         )
         return fl.FlightInfo(table.schema, descriptor, [endpoint], table.num_rows, table.nbytes)
@@ -80,7 +88,7 @@ class MemcoveFlightServer(fl.FlightServerBase):
     # -- DoPut: stream batches into a dataset ---------------------------------
 
     def do_put(self, context, descriptor: fl.FlightDescriptor, reader, writer):
-        cmd = tickets.decode(descriptor.command)
+        cmd = tickets.verify(descriptor.command)
         if cmd.get("op") != "ingest":
             raise fl.FlightError(f"unsupported DoPut op {cmd.get('op')!r}")
         tenant = normalize_tenant(cmd.get("tenant"))
@@ -103,6 +111,12 @@ class MemcoveFlightServer(fl.FlightServerBase):
 def serve() -> None:
     logging.basicConfig(level=logging.INFO)
     settings = get_settings()
+    if settings.flight_ticket_secret in ("", "dev-insecure-change-me"):
+        logger.warning(
+            "flight_ticket_secret is the INSECURE DEFAULT — anyone who can reach the "
+            "Flight port can forge tenant-scoped tickets. Set "
+            "MEMCOVE_FLIGHT_TICKET_SECRET before exposing this server."
+        )
     location = f"grpc://{settings.flight_host}:{settings.flight_port}"
     server = MemcoveFlightServer(location)
     try:

@@ -22,6 +22,7 @@ from memcove.core.tenancy import normalize_tenant, resolve_tenant
 from memcove.data_plane import tickets
 from memcove.tools import artifacts as artifacts_tool
 from memcove.tools import derive as derive_tool
+from memcove.tools import discovery as discovery_tool
 from memcove.tools import ingest as ingest_tool
 from memcove.tools import objects as objects_tool
 from memcove.tools import query as query_tool
@@ -229,6 +230,21 @@ def list_memory(
 
 
 @mcp.tool()
+def discover_reference_data(ctx: Context) -> dict:
+    """List the shared reference datasets available to every tenant (read-only).
+
+    Beyond your own private datasets, Memcove may expose shared reference data
+    (e.g. market/reference tables) that anyone can query but no one can modify.
+    Use this to see which shared schemas and tables exist and their columns, then
+    read them in SQL by their qualified name, e.g. `SELECT * FROM ref_market.prices`.
+
+    Returns {schemas: [{schema, tables: [{name, columns: [{name, type}]}]}]}.
+    """
+    _ = _tenant(ctx)  # ensure the caller is a resolvable tenant before disclosing
+    return discovery_tool.discover_reference_data()
+
+
+@mcp.tool()
 def export_dataset(
     ctx: Context,
     fmt: Annotated[
@@ -317,12 +333,15 @@ def stream_dataset(
     if name:
         cmd = tickets.read_command(tenant, validate_label(name))
     else:
-        validate_select(sql, tenant_ns=tenant, catalog=settings.trino_catalog)  # fail fast
+        validate_select(  # fail fast
+            sql, tenant_ns=tenant, catalog=settings.trino_catalog,
+            shared_schemas=settings.shared_schemas,
+        )
         cmd = tickets.query_command(tenant, sql)
     return {
         "flight_uri": settings.flight_advertise_uri,
         "transport": "arrow-flight",
-        "ticket_b64": tickets.to_b64(cmd),
+        "ticket_b64": tickets.to_b64_signed(cmd),
         "how": "DoGet on flight_uri with base64-decoded ticket_b64 to stream Arrow batches",
     }
 
@@ -353,7 +372,7 @@ def open_ingest_stream(
     return {
         "flight_uri": settings.flight_advertise_uri,
         "transport": "arrow-flight",
-        "descriptor_command_b64": tickets.to_b64(cmd),
+        "descriptor_command_b64": tickets.to_b64_signed(cmd),
         "how": "DoPut on flight_uri using FlightDescriptor.for_command(base64-decoded), then write Arrow batches",
     }
 

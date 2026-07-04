@@ -1,6 +1,6 @@
 [project]
 name = "memcove"
-version = "0.1.0"
+version = "0.2.0"
 description = "Memcove — a lakehouse-backed memory service for LLM agents, exposed over MCP"
 readme = "README.md"
 requires-python = ">=3.12"

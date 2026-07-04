@@ -1,9 +1,10 @@
 """Tenant resolution seam.
 
-Auth is deferred (see plan). For now the tenant is read from a request header
-(``x-memcove-tenant``) and validated/normalized. When real auth lands, only this
-module changes: replace ``resolve_tenant`` with token/OAuth introspection that
-yields the same normalized tenant id. Everything downstream already keys on it.
+Memcove sits behind an authenticating proxy that sets trusted headers. This module
+turns those headers into a normalized internal tenant namespace — either directly
+(``tenant_header``) or via a configurable provisioning map from a verified identity
+(subject/group) to an internal id. It is the single place tenant identity is decided;
+everything downstream keys on the normalized namespace it returns.
 """
 
 from __future__ import annotations
@@ -34,18 +35,54 @@ def normalize_tenant(raw: str | None) -> str:
     return namespace
 
 
+def _header(headers: dict[str, str], name: str) -> str | None:
+    """Case-insensitive header lookup."""
+    if not name:
+        return None
+    wanted = name.lower()
+    for key, value in headers.items():
+        if key.lower() == wanted:
+            return value
+    return None
+
+
+def _map_identity(headers: dict[str, str], settings) -> str | None:
+    """Map a proxy-provided identity (subject, else a matching group) to a tenant id."""
+    subject = _header(headers, settings.tenant_subject_header)
+    if subject and subject in settings.tenant_map:
+        return settings.tenant_map[subject]
+    groups = _header(headers, settings.tenant_group_header) or ""
+    for group in (g.strip() for g in groups.split(",")):
+        if group and group in settings.tenant_map:
+            return settings.tenant_map[group]
+    return None
+
+
 def resolve_tenant(headers: dict[str, str] | None) -> str:
     """Resolve the tenant namespace from request headers.
 
-    Headers are matched case-insensitively. Falls back to the default tenant
-    when the header is absent (single-user / local dev).
+    Two modes, in order:
+
+    1. **Provisioning map** — if ``tenant_subject_header`` is configured, map the
+       verified identity through ``tenant_map`` to an internal tenant id. This is the
+       seam clients wire so a raw OIDC ``sub`` is never used as a namespace directly.
+       This mode is fail-closed: an unmapped identity is rejected, never allowed to
+       fall through to the client-settable tenant header.
+    2. **Direct header** — trust ``tenant_header`` (dev/simple), falling back to the
+       default tenant when absent.
+
+    Headers are matched case-insensitively.
     """
     settings = get_settings()
-    raw = None
-    if headers:
-        wanted = settings.tenant_header.lower()
-        for key, value in headers.items():
-            if key.lower() == wanted:
-                raw = value
-                break
-    return normalize_tenant(raw)
+    headers = headers or {}
+
+    if settings.tenant_subject_header:
+        # Provisioning mode: the tenant MUST come from the map. Never fall through
+        # to the raw, client-settable tenant header — that would let an unmapped
+        # caller self-select any tenant, the exact thing this mode exists to stop.
+        mapped = _map_identity(headers, settings)
+        if mapped is None:
+            raise TenancyError("caller identity is not provisioned to any tenant")
+        return normalize_tenant(mapped)
+
+    return normalize_tenant(_header(headers, settings.tenant_header))

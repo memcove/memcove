@@ -23,7 +23,11 @@ def _qualified(tenant: str, label: str) -> str:
 
 def _row_count(tenant: str, label: str) -> int | None:
     try:
-        return int(trino_client.scalar(f"SELECT count(*) FROM {_qualified(tenant, label)}"))
+        return int(
+            trino_client.scalar(
+                f"SELECT count(*) FROM {_qualified(tenant, label)}", run_as=tenant
+            )
+        )
     except Exception:  # noqa: BLE001 - count is best-effort metadata
         return None
 
@@ -91,8 +95,11 @@ def get_object(
     if mode == "preview":
         settings = get_settings()
         cap = min(limit or settings.preview_row_cap, settings.preview_row_cap)
-        guard = validate_select(f"SELECT * FROM {label}", tenant, settings.trino_catalog)
-        columns, rows = trino_client.execute(wrap_preview(guard.sql, cap))
+        guard = validate_select(
+            f"SELECT * FROM {label}", tenant, settings.trino_catalog,
+            shared_schemas=settings.shared_schemas,
+        )
+        columns, rows = trino_client.execute(wrap_preview(guard.sql, cap), run_as=tenant)
         truncated = len(rows) > cap
         result = PreviewResult(
             columns=columns,

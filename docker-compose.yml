@@ -1,0 +1,96 @@
+# Memcove self-contained local lakehouse stack.
+#   minio          object store (S3-compatible)            :9000 (api) :9001 (console)
+#   iceberg-rest   Iceberg REST catalog                    :8181
+#   trino          query engine (read/derive/export)       :8080
+#   postgres       control-plane registry (objects/lineage):5432
+#
+# Bring up:  docker compose up -d
+# Tear down: docker compose down -v
+
+name: memcove
+
+services:
+  minio:
+    image: minio/minio:latest
+    container_name: memcove-minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: minio12345
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    volumes:
+      - minio-data:/data
+
+  # Creates the buckets Memcove needs, then exits.
+  minio-init:
+    image: minio/mc:latest
+    container_name: memcove-minio-init
+    depends_on:
+      minio:
+        condition: service_started
+    entrypoint: >
+      /bin/sh -c "
+      until (mc alias set local http://minio:9000 minio minio12345) do echo '...waiting for minio'; sleep 1; done;
+      mc mb --ignore-existing local/warehouse;
+      mc mb --ignore-existing local/memcove-staging;
+      mc mb --ignore-existing local/memcove-artifacts;
+      echo 'buckets ready';
+      exit 0;
+      "
+
+  iceberg-rest:
+    image: apache/iceberg-rest-fixture:latest
+    container_name: memcove-iceberg-rest
+    ports:
+      - "8181:8181"
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      AWS_ACCESS_KEY_ID: minio
+      AWS_SECRET_ACCESS_KEY: minio12345
+      AWS_REGION: us-east-1
+      CATALOG_WAREHOUSE: s3://warehouse/
+      CATALOG_IO__IMPL: org.apache.iceberg.aws.s3.S3FileIO
+      CATALOG_S3_ENDPOINT: http://minio:9000
+      CATALOG_S3_PATH__STYLE__ACCESS: "true"
+
+  trino:
+    image: trinodb/trino:latest
+    container_name: memcove-trino
+    ports:
+      - "8080:8080"
+    depends_on:
+      iceberg-rest:
+        condition: service_started
+    volumes:
+      - ./infra/trino/etc/catalog:/etc/trino/catalog:ro
+
+  postgres:
+    image: postgres:16
+    container_name: memcove-postgres
+    ports:
+      # 5433 on the host to avoid colliding with a local postgres on 5432.
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: memcove
+      POSTGRES_PASSWORD: memcove
+      POSTGRES_DB: memcove
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U memcove"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+
+volumes:
+  minio-data:
+  pg-data:

@@ -1,0 +1,50 @@
+[project]
+name = "memcove"
+version = "0.1.0"
+description = "Memcove — a lakehouse-backed memory service for LLM agents, exposed over MCP"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "mcp>=1.2.0",
+    "trino>=0.330.0",
+    "pyiceberg[s3fs,pyarrow]>=0.8.0",
+    "pyarrow>=17.0.0",
+    "boto3>=1.34.0",
+    "sqlglot>=25.0.0",
+    "psycopg[binary]>=3.2.0",
+    "pydantic>=2.7.0",
+    "pydantic-settings>=2.3.0",
+    "uvicorn>=0.30.0",
+    "starlette>=0.37.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.2.0",
+    "pytest-asyncio>=0.23.0",
+    "polars>=1.0.0",
+    "requests>=2.32.0",
+    "openai>=1.40.0",
+]
+
+[project.scripts]
+memcove-server = "memcove.server:main"
+memcove-flight = "memcove.data_plane.flight_server:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/memcove"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = [
+    "integration: requires the docker-compose stack to be up",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"

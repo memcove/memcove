@@ -1,0 +1,27 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Local config & lockfiles
+.env
+uv.lock
+
+# Test / pytest caches
+.pytest_cache/
+
+# Claude setup
+.claude/
+
+# Internal docs
+internal/
+
+# macOS
+.DS_Store
+ROADMAP.md

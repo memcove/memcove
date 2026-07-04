@@ -37,6 +37,10 @@ jobs:
       - name: Build site (strict — fails on broken links or missing nav)
         run: mkdocs build --strict
       - uses: actions/configure-pages@v5
+        with:
+          # Create/enable the Pages site (build type = GitHub Actions) if it isn't
+          # already, so the first deploy doesn't fail with "Get Pages site failed".
+          enablement: true
       - uses: actions/upload-pages-artifact@v3
         with:
           path: ./site

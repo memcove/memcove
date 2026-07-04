@@ -25,3 +25,7 @@ class IngestError(MemcoveError):
 
 class TenancyError(MemcoveError):
     """Raised when a tenant cannot be resolved."""
+
+
+class TicketError(MemcoveError):
+    """Raised when a Flight ticket/descriptor fails signature or expiry checks."""

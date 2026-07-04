@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from memcove.core import catalog, registry, trino_client
+from memcove.core.audit import audit
 from memcove.core.config import get_settings
 from memcove.core.errors import ObjectExistsError, ObjectNotFoundError
 from memcove.core.models import MemoryObject, SourceKind
@@ -21,7 +22,10 @@ def derive_object(
     """Run ``CREATE TABLE <tenant>.<new_label> AS <validated select>`` and track lineage."""
     new_label = validate_label(new_label)
     settings = get_settings()
-    guard = validate_select(sql, tenant_ns=tenant, catalog=settings.trino_catalog)
+    guard = validate_select(
+        sql, tenant_ns=tenant, catalog=settings.trino_catalog,
+        shared_schemas=settings.shared_schemas,
+    )
 
     exists = catalog.table_exists(tenant, new_label)
     if mode == "create" and exists:
@@ -35,7 +39,8 @@ def derive_object(
 
     trino_client.ensure_schema(tenant)
     target = f'"{settings.trino_catalog}"."{tenant}"."{new_label}"'
-    trino_client.execute_update(f"CREATE TABLE {target} AS {guard.sql}")
+    trino_client.execute_update(f"CREATE TABLE {target} AS {guard.sql}", run_as=tenant)
+    audit("derive", tenant=tenant, target=new_label, mode=mode, sql=guard.sql)
 
     # Only labels that actually exist as objects count as lineage parents.
     parents = [lbl for lbl in guard.referenced_labels if catalog.table_exists(tenant, lbl)]

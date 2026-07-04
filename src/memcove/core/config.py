@@ -37,13 +37,27 @@ class Settings(BaseSettings):
     # Trino
     trino_host: str = "localhost"
     trino_port: int = 8080
-    trino_user: str = "memcove"
+    trino_user: str = "memcove"  # service principal; connect identity when not impersonating
     trino_catalog: str = "iceberg"
+    trino_http_scheme: str = "http"  # "https" for TLS-fronted Trino in real deployments
+    # When true, each request connects to Trino AS the caller's tenant so the operator's
+    # own Trino access control applies per tenant (defense-in-depth beneath the SQL guard).
+    # Requires the service principal to hold impersonation rights + a configured grant
+    # backend. Off by default so local/dev works with a single identity.
+    trino_impersonation: bool = False
+    # Session properties applied to every data connection (generic passthrough so the
+    # operator sets whatever their Trino version supports — resource caps, etc.), e.g.
+    # {"query_max_run_time":"60s","query_max_scan_physical_bytes":"10GB"}.
+    trino_session_properties: dict[str, str] = {}
 
     # Arrow Flight streaming data plane (M3)
     flight_host: str = "0.0.0.0"  # bind address
     flight_port: int = 8815
     flight_advertise_uri: str = "grpc://localhost:8815"  # what clients are told to dial
+    # HMAC secret for signing Flight tickets/descriptors so a client cannot forge one
+    # to read/write another tenant. MUST be overridden in any real deployment.
+    flight_ticket_secret: str = "dev-insecure-change-me"
+    flight_ticket_ttl_seconds: int = 300  # signed tickets expire after this many seconds
 
     # Postgres registry
     pg_dsn: str = "postgresql://memcove:memcove@localhost:5433/memcove"
@@ -54,9 +68,29 @@ class Settings(BaseSettings):
     export_row_cap: int = 5_000_000
     presign_ttl_seconds: int = 3600
 
-    # Tenancy (auth deferred)
+    # Tenancy. Default: trust a tenant header set by the auth proxy (dev/simple).
     tenant_header: str = "x-memcove-tenant"
     default_tenant: str = "default"
+
+    # Provisioning map (optional). When tenant_subject_header is set, the tenant is
+    # resolved by mapping the proxy-provided identity (subject, else a matching group)
+    # through tenant_map -> internal tenant id, instead of trusting a raw tenant value.
+    # This is the seam for "don't feed a raw OIDC sub straight through".
+    # Provisioning mode is fail-closed: when tenant_subject_header is set, an identity
+    # absent from tenant_map is rejected (never falls through to the raw tenant header).
+    tenant_subject_header: str = ""  # e.g. "x-auth-subject"; empty = direct tenant header
+    tenant_group_header: str = ""  # e.g. "x-auth-groups" (comma-separated)
+    tenant_map: dict[str, str] = {}  # subject/group -> internal tenant id
+
+    # Shared read-only reference plane (the gateway): schemas every tenant may SELECT
+    # from but none may write. These are NOT rewritten to the caller's namespace by the
+    # SQL guard; they resolve to themselves. Per-domain schemas contain blast radius.
+    shared_schemas: list[str] = ["ref_market"]
+
+    # Ingest allowlist: agent-supplied `s3_parquet` URIs must start with one of these
+    # prefixes. Empty list = agent s3_parquet ingest is DISABLED (fail closed) to avoid
+    # a confused-deputy read of any bucket the service credential can reach.
+    allowed_s3_ingest_prefixes: list[str] = []
 
 
 @lru_cache

@@ -49,7 +49,7 @@ def flight_client():
 def test_doput_then_doget_roundtrip(flight_client):
     table = pa.table({"id": [1, 2, 3, 4], "g": ["a", "b", "a", "b"]})
     desc = fl.FlightDescriptor.for_command(
-        tickets.encode(tickets.ingest_command(TENANT, "fds", "replace"))
+        tickets.sign(tickets.ingest_command(TENANT, "fds", "replace"))
     )
     writer, _ = flight_client.do_put(desc, table.schema)
     writer.write_table(table)
@@ -57,7 +57,7 @@ def test_doput_then_doget_roundtrip(flight_client):
 
     assert trino_client.scalar(f'SELECT count(*) FROM "iceberg"."{TENANT}"."fds"') == 4
 
-    ticket = fl.Ticket(tickets.encode(tickets.read_command(TENANT, "fds")))
+    ticket = fl.Ticket(tickets.sign(tickets.read_command(TENANT, "fds")))
     out = flight_client.do_get(ticket).read_all()
     assert out.num_rows == 4
     assert set(out.column_names) == {"id", "g"}
@@ -65,7 +65,12 @@ def test_doput_then_doget_roundtrip(flight_client):
 
 def test_doget_rejects_cross_tenant(flight_client):
     ticket = fl.Ticket(
-        tickets.encode(tickets.query_command(normalize_tenant("intruder"), f'SELECT * FROM "{TENANT}".fds'))
+        tickets.sign(tickets.query_command(normalize_tenant("intruder"), f'SELECT * FROM "{TENANT}".fds'))
     )
     with pytest.raises(Exception):
         flight_client.do_get(ticket).read_all()
+
+    # A forged (unsigned) ticket is rejected outright by the signature check.
+    forged = fl.Ticket(tickets.encode(tickets.read_command(TENANT, "fds")))
+    with pytest.raises(Exception):
+        flight_client.do_get(forged).read_all()

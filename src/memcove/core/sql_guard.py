@@ -39,6 +39,12 @@ _FORBIDDEN = (
 
 _ALLOWED_TOP = (exp.Select, exp.Union, exp.Intersect, exp.Except, exp.Subquery)
 
+# Metadata / enumeration schemas: denied even inside the allowed catalog, because they
+# let a caller enumerate other tenants' schemas under an otherwise read-only rule.
+_DENY_SCHEMAS = frozenset(
+    {"information_schema", "system", "jdbc", "metadata", "sys", "pg_catalog"}
+)
+
 
 @dataclass
 class GuardedQuery:
@@ -56,8 +62,17 @@ def _cte_names(tree: exp.Expression) -> set[str]:
     return names
 
 
-def validate_select(sql: str, tenant_ns: str, catalog: str) -> GuardedQuery:
-    """Validate a read-only statement and qualify every table to ``tenant_ns``."""
+def validate_select(
+    sql: str, tenant_ns: str, catalog: str, shared_schemas: list[str] | None = None
+) -> GuardedQuery:
+    """Validate a read-only statement and resolve every table reference.
+
+    Bare names and references to the caller's own schema are qualified to ``tenant_ns``;
+    references to a schema in ``shared_schemas`` (the read-only reference plane) resolve
+    to themselves; every other namespace, foreign catalog, or metadata schema (e.g.
+    ``information_schema``, ``system``) is rejected. Comparison is case-folded, so a
+    quoted mixed-case identifier cannot smuggle in a foreign schema.
+    """
     stripped = sql.strip().rstrip(";").strip()
     if not stripped:
         raise SqlGuardError("empty SQL")
@@ -84,6 +99,9 @@ def validate_select(sql: str, tenant_ns: str, catalog: str) -> GuardedQuery:
             )
 
     cte_names = _cte_names(tree)
+    shared = {s.strip().lower() for s in (shared_schemas or []) if s.strip()}
+    tenant_lc = tenant_ns.lower()
+    cat_lc = catalog.lower()
     referenced: list[str] = []
 
     for table in tree.find_all(exp.Table):
@@ -95,18 +113,34 @@ def validate_select(sql: str, tenant_ns: str, catalog: str) -> GuardedQuery:
         if not db and not cat and name in cte_names:
             continue
 
-        if db and db != tenant_ns.lower():
-            raise SqlGuardError(
-                f"cross-namespace reference '{db}.{name}' is not permitted; "
-                f"you may only reference your own objects"
-            )
-        if cat and cat != catalog.lower():
+        # Fail closed on any FROM-item we can't classify as a plain named table
+        # (e.g. a polymorphic TABLE(system.query(...)) function parses as an
+        # empty-name exp.Table). If we can't prove it stays in-tenant, reject it.
+        if not name:
+            raise SqlGuardError("unsupported table expression in FROM clause")
+
+        # Foreign catalogs (system, jdbc, other Trino catalogs) are never permitted.
+        if cat and cat != cat_lc:
             raise SqlGuardError(
                 f"cross-catalog reference '{cat}.{db}.{name}' is not permitted"
             )
+        # Metadata/enumeration schemas are denied even inside the allowed catalog.
+        if db in _DENY_SCHEMAS:
+            raise SqlGuardError(
+                f"reference to restricted schema '{db}' is not permitted"
+            )
 
-        # Qualify to the caller's namespace.
-        table.set("db", exp.to_identifier(tenant_ns))
+        if not db or db == tenant_lc:
+            # Bare name or the caller's own schema -> the caller's private namespace.
+            table.set("db", exp.to_identifier(tenant_ns))
+        elif db in shared:
+            # Shared read-only reference plane: resolves to itself (canonical lowercase).
+            table.set("db", exp.to_identifier(db))
+        else:
+            raise SqlGuardError(
+                f"cross-namespace reference '{db}.{name}' is not permitted; you may "
+                f"only reference your own objects or the shared reference plane"
+            )
         table.set("catalog", exp.to_identifier(catalog))
         if name and name not in referenced:
             referenced.append(name)

@@ -14,7 +14,33 @@ from memcove.core.naming import validate_label
 from memcove.tools.objects import describe_object
 
 
-def _table_from_source(source: dict) -> tuple[pa.Table, SourceKind, str | None]:
+def _check_s3_ingest_allowed(uri: str, settings) -> None:
+    """Guard against a confused-deputy read of arbitrary S3 via agent-supplied URIs.
+
+    An agent controls ``uri``; without an allowlist Memcove would read any object its
+    service credential can reach. Empty allowlist = fail closed (feature disabled).
+    """
+    prefixes = settings.allowed_s3_ingest_prefixes or []
+    if not prefixes:
+        raise IngestError(
+            "s3_parquet ingest is disabled; set MEMCOVE_ALLOWED_S3_INGEST_PREFIXES "
+            "to an allowlist of permitted s3:// prefixes to enable it"
+        )
+
+    def _within(prefix: str) -> bool:
+        # Match on a path boundary so prefix "s3://bucket" does NOT also permit
+        # "s3://bucket-evil"; the uri must equal the prefix or sit under its "/".
+        prefix = prefix.rstrip("/")
+        return uri == prefix or uri.startswith(prefix + "/")
+
+    if not any(_within(p) for p in prefixes):
+        raise IngestError(
+            f"s3 uri {uri!r} is not within an allowed ingest prefix; "
+            "permitted prefixes are configured by the operator"
+        )
+
+
+def _table_from_source(source: dict, tenant: str) -> tuple[pa.Table, SourceKind, str | None]:
     """Resolve an ingest source descriptor into (arrow_table, source_kind, ref)."""
     kind = source.get("kind")
     settings = get_settings()
@@ -36,11 +62,17 @@ def _table_from_source(source: dict) -> tuple[pa.Table, SourceKind, str | None]:
 
     if kind == "s3_parquet":
         uri = source["uri"]
+        _check_s3_ingest_allowed(uri, settings)
         table = storage.read_parquet_table(uri)
         return table, SourceKind.S3_PARQUET, uri
 
     if kind == "upload_handle":
         handle = source["handle"]
+        # Bind the handle to the caller: minted handles are uploads/{tenant}/...
+        # (see request_upload). Without this a caller could read another tenant's
+        # pending upload out of the shared staging bucket.
+        if not handle.startswith(f"uploads/{tenant}/"):
+            raise IngestError("upload handle does not belong to this tenant")
         table = storage.read_parquet_table(settings.staging_bucket, handle)
         return table, SourceKind.UPLOAD, handle
 
@@ -56,7 +88,7 @@ def ingest_object(
 ) -> MemoryObject:
     """Ingest data into a labeled Iceberg object via the PyIceberg write path."""
     label = validate_label(label)
-    table, kind, ref = _table_from_source(source)
+    table, kind, ref = _table_from_source(source, tenant)
 
     catalog.write_arrow(tenant, label, table, mode=mode)
     registry.record_object(

@@ -4,6 +4,11 @@ Memcove ships no opinionated cluster manifest — it's a generic, self-hostable 
 bring your own object store, Trino, catalog, Postgres, and identity proxy. This checklist
 is the hardening you must apply before exposing it beyond a trusted network.
 
+!!! danger "Do not expose Memcove without a proxy + network isolation"
+    In its default configuration Memcove trusts the tenant header, so anything that can
+    reach the port can read any tenant's data. The items below are not optional for an
+    internet- or org-reachable deployment.
+
 ## Identity & trust boundary
 
 - [ ] **Front Memcove with an authenticating proxy.** It authenticates the caller and sets

@@ -57,6 +57,12 @@ The defaults target the local Docker stack, so local development needs no change
 | `MEMCOVE_FLIGHT_TICKET_SECRET` | str | `dev-insecure-change-me` | **HMAC signing secret — override in any real deployment.** |
 | `MEMCOVE_FLIGHT_TICKET_TTL_SECONDS` | int | `300` | signed ticket lifetime |
 
+!!! warning "Change the ticket secret before you expose the Flight port"
+    `MEMCOVE_FLIGHT_TICKET_SECRET` defaults to a known, insecure value. Anyone who can
+    reach the Flight port with the default secret can forge tenant-scoped tickets. Set a
+    strong random value in any real deployment; the Flight server logs a loud warning if
+    you don't.
+
 ## Postgres registry
 
 | Setting | Type | Default | Notes |

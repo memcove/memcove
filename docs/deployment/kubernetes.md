@@ -17,6 +17,11 @@ can't be sidestepped.
 --8<-- "deploy/networkpolicy.example.yaml"
 ```
 
+!!! warning "Restrict Trino too"
+    Locking down the Memcove pods is not enough. If tenants (or anything else) can reach
+    Trino directly, per-tenant impersonation can be sidestepped. Apply an equivalent policy
+    in your Trino namespace so only Memcove can reach it.
+
 ## Values surface
 
 The full config surface as a values file — every key maps to a `MEMCOVE_*` env var.

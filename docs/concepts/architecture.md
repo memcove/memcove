@@ -116,7 +116,8 @@ bytes against the Flight server. Reads run the same guard + Trino path; writes g
 
 ## The two write surfaces
 
-Worth internalizing: the entire write surface is exactly two code paths —
-`catalog.write_arrow` (inline / s3 / upload ingest, and Flight `DoPut`) and the Trino
-CTAS in `derive_object`. Both are fed only validated labels and guard-rewritten SQL.
-Everything else is read-only. That is what makes the isolation model tractable.
+!!! abstract "The core invariant"
+    The entire write surface is exactly two code paths — `catalog.write_arrow` (inline /
+    s3 / upload ingest, and Flight `DoPut`) and the Trino CTAS in `derive_object`. Both are
+    fed only validated labels and guard-rewritten SQL. Everything else is read-only. That
+    is what makes the isolation model tractable.

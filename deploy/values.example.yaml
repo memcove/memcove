@@ -1,0 +1,46 @@
+# EXAMPLE values — the Memcove config surface as a values file, for wiring into your
+# own Helm chart / ArgoCD Application / Kustomize base. Every key maps to a MEMCOVE_*
+# env var. Secrets (S3 keys, PG password, ticket secret) should come from your secret
+# manager, not this file. Defaults live in the app; only override what you need.
+memcove:
+  # MCP + Flight
+  port: 8090
+  flight:
+    port: 8815
+    advertiseUri: grpc://memcove-flight.internal:8815
+    ticketTtlSeconds: 300
+    # ticketSecret: <from secret manager>  (MEMCOVE_FLIGHT_TICKET_SECRET)
+
+  # Object store (bring your own S3-compatible store)
+  s3:
+    endpoint: https://s3.us-east-1.amazonaws.com
+    region: us-east-1
+    pathStyle: false
+    warehouseBucket: my-memcove-warehouse
+    stagingBucket: my-memcove-staging
+    artifactsBucket: my-memcove-artifacts
+    # accessKey / secretKey: <from secret manager>
+
+  # Iceberg REST catalog
+  iceberg:
+    restUri: http://iceberg-rest.internal:8181
+    warehouse: s3://my-memcove-warehouse/
+    catalogName: memcove
+
+  # Trino read/derive/export engine
+  trino:
+    host: trino.internal
+    port: 443
+    httpScheme: https
+    user: memcove # service principal
+    catalog: iceberg
+    impersonation: true # connect AS the tenant; requires a Trino grant backend
+
+  # Postgres control-plane registry
+  # pgDsn: <from secret manager>  (MEMCOVE_PG_DSN)
+
+  # Tenancy + isolation
+  tenantHeader: x-memcove-tenant # set by your auth proxy; clients cannot spoof it
+  sharedSchemas: # read-only reference plane; per-domain schemas
+    - ref_market
+  allowedS3IngestPrefixes: [] # empty = agent s3_parquet ingest disabled (fail closed)

@@ -1,0 +1,30 @@
+# EXAMPLE NetworkPolicy — adapt to your cluster; not applied by Memcove.
+#
+# Memcove trusts a tenant header set by an authenticating proxy, so the ONLY thing
+# that may reach its ports is that proxy. This policy denies all ingress to the
+# Memcove pods except from pods labelled as the identity proxy. Replace labels,
+# namespace, and ports to match your environment.
+#
+# Trino should be similarly restricted so that only Memcove can reach it (a separate
+# policy in your Trino namespace) — otherwise impersonation can be sidestepped.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: memcove-proxy-only-ingress
+  namespace: memcove # <- your namespace
+spec:
+  podSelector:
+    matchLabels:
+      app: memcove # <- your Memcove pod label
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: oidc-proxy # <- the ONLY allowed caller (your auth proxy)
+      ports:
+        - protocol: TCP
+          port: 8090 # MCP server  (MEMCOVE_PORT)
+        - protocol: TCP
+          port: 8815 # Arrow Flight (MEMCOVE_FLIGHT_PORT)

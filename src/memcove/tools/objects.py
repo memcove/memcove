@@ -32,32 +32,88 @@ def _row_count(tenant: str, label: str) -> int | None:
         return None
 
 
+def _read_repair(tenant: str, label: str):
+    """Backfill a RECONCILED registry row for an Iceberg table that has none.
+
+    This is synchronous self-healing: after a crash between the data write and the
+    registry write the object is still queryable via Trino but invisible to
+    ``list``/``describe``. Repairing it inline on the read path means the safety
+    guarantee holds from M5 GA — it does not wait for the M7 reconciler cron. The
+    lost user metadata (tags/producing_sql/lineage) is not reconstructable; a
+    RECONCILED source marks that it should be re-supplied by re-running the producer.
+
+    Returns the freshly written row, or None if the table itself does not exist.
+    """
+    if not catalog.table_exists(tenant, label):
+        return None
+    registry.record_object(
+        tenant,
+        label,
+        table_ident=f"{get_settings().trino_catalog}.{tenant}.{label}",
+        source=SourceKind.RECONCILED.value,
+    )
+    return registry.get_object(tenant, label)
+
+
 def describe_object(tenant: str, label: str) -> MemoryObject:
     """Full metadata for an object: schema, source, lineage, row count."""
     label = validate_label(label)
     reg = registry.get_object(tenant, label)
-    if reg is None and not catalog.table_exists(tenant, label):
-        raise ObjectNotFoundError(f"object '{label}' does not exist")
+    if reg is None:
+        reg = _read_repair(tenant, label)  # table exists but no row -> backfill inline
+        if reg is None:
+            raise ObjectNotFoundError(f"object '{label}' does not exist")
 
     schema = [ColumnSchema(name=n, type=t) for n, t in catalog.load_schema(tenant, label)]
     parents = registry.get_parents(tenant, label)
 
-    source = SourceKind(reg["source"]) if reg else SourceKind.S3_PARQUET
+    return MemoryObject(
+        tenant=tenant,
+        label=label,
+        table_ident=f"{get_settings().trino_catalog}.{tenant}.{label}",
+        source=SourceKind(reg["source"]),
+        source_ref=reg.get("source_ref"),
+        schema=schema,
+        row_count=_row_count(tenant, label),
+        tags=list(reg["tags"]),
+        lineage=Lineage(
+            parents=parents,
+            producing_sql=reg.get("producing_sql"),
+        ),
+        created_at=reg.get("created_at"),
+        updated_at=reg.get("updated_at"),
+    )
+
+
+def pending_object(
+    tenant: str,
+    label: str,
+    *,
+    source: SourceKind,
+    source_ref: str | None = None,
+    tags: list[str] | None = None,
+    producing_sql: str | None = None,
+    parents: list[str] | None = None,
+) -> MemoryObject:
+    """Build a ``metadata_pending`` response from values in hand.
+
+    Used when the data write committed but the guarded registry write failed. It
+    deliberately does NOT read the registry (that is the store that just failed) and
+    does NOT call ``describe_object`` (which would trigger read-repair and persist a
+    RECONCILED row, discarding the DERIVED source + lineage we already know). Schema
+    and row count come from the catalog / Trino, which are up.
+    """
     return MemoryObject(
         tenant=tenant,
         label=label,
         table_ident=f"{get_settings().trino_catalog}.{tenant}.{label}",
         source=source,
-        source_ref=reg.get("source_ref") if reg else None,
-        schema=schema,
+        source_ref=source_ref,
+        schema=[ColumnSchema(name=n, type=t) for n, t in catalog.load_schema(tenant, label)],
         row_count=_row_count(tenant, label),
-        tags=list(reg["tags"]) if reg else [],
-        lineage=Lineage(
-            parents=parents,
-            producing_sql=reg.get("producing_sql") if reg else None,
-        ),
-        created_at=reg.get("created_at") if reg else None,
-        updated_at=reg.get("updated_at") if reg else None,
+        tags=tags or [],
+        lineage=Lineage(parents=parents or [], producing_sql=producing_sql),
+        metadata_pending=True,
     )
 
 

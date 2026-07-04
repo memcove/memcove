@@ -5,11 +5,34 @@ from __future__ import annotations
 from memcove.core import catalog, registry, trino_client
 from memcove.core.audit import audit
 from memcove.core.config import get_settings
-from memcove.core.errors import ObjectExistsError, ObjectNotFoundError
+from memcove.core.errors import ObjectExistsError, SchemaMismatchError
 from memcove.core.models import MemoryObject, SourceKind
 from memcove.core.naming import validate_label
 from memcove.core.sql_guard import validate_select
-from memcove.tools.objects import describe_object
+from memcove.tools.objects import describe_object, pending_object
+
+
+def _assert_replace_keeps_shape(tenant: str, new_label: str, select_sql: str) -> None:
+    """Reject a derive replace that changes the object's columns.
+
+    Unifies the replace contract with the ingest path: ``replace`` never reshapes an
+    object. derive's schema follows the SELECT, so we compare the existing table's
+    column names to the query's output columns (via a zero-row probe). Type-only
+    changes on identical column names follow the SELECT; column add/remove/rename is
+    rejected. To change shape, ``forget()`` then ``create()``.
+    """
+    existing_cols = {n for n, _ in catalog.load_schema(tenant, new_label)}
+    new_cols, _ = trino_client.execute(
+        f"SELECT * FROM ({select_sql}) _probe WHERE 1 = 0", run_as=tenant
+    )
+    new_set = set(new_cols)
+    if existing_cols != new_set:
+        added = sorted(new_set - existing_cols)
+        removed = sorted(existing_cols - new_set)
+        raise SchemaMismatchError(
+            f"derive replace of '{new_label}' changes columns "
+            f"(added={added}; removed={removed}); forget() then create() to change shape"
+        )
 
 
 def derive_object(
@@ -19,8 +42,16 @@ def derive_object(
     mode: str = "create",
     tags: list[str] | None = None,
 ) -> MemoryObject:
-    """Run ``CREATE TABLE <tenant>.<new_label> AS <validated select>`` and track lineage."""
+    """Materialize ``<tenant>.<new_label>`` from a validated SELECT (CTAS).
+
+    ``create`` uses ``CREATE TABLE`` (exclusive — fails if it already exists).
+    ``replace`` uses ``CREATE OR REPLACE TABLE`` (Iceberg connector, Trino server
+    431+): an atomic swap with no drop window, so a concurrent reader always sees a
+    valid table version.
+    """
     new_label = validate_label(new_label)
+    if mode not in ("create", "replace"):
+        raise ValueError(f"unknown mode {mode!r}; expected create|replace")
     settings = get_settings()
     guard = validate_select(
         sql, tenant_ns=tenant, catalog=settings.trino_catalog,
@@ -29,28 +60,33 @@ def derive_object(
 
     exists = catalog.table_exists(tenant, new_label)
     if mode == "create" and exists:
-        raise ObjectExistsError(
-            f"object '{new_label}' already exists (use mode=replace)"
-        )
+        raise ObjectExistsError(f"object '{new_label}' already exists (use mode=replace)")
     if mode == "replace" and exists:
-        catalog.drop_table(tenant, new_label)
-    if mode not in ("create", "replace"):
-        raise ValueError(f"unknown mode {mode!r}; expected create|replace")
+        _assert_replace_keeps_shape(tenant, new_label, guard.sql)
 
     trino_client.ensure_schema(tenant)
     target = f'"{settings.trino_catalog}"."{tenant}"."{new_label}"'
-    trino_client.execute_update(f"CREATE TABLE {target} AS {guard.sql}", run_as=tenant)
+    # replace is an atomic swap; create is exclusive. Using plain CREATE TABLE for
+    # create means Trino itself rejects a concurrent create that raced past the
+    # exists-check above, instead of one derive silently clobbering the other.
+    verb = "CREATE OR REPLACE TABLE" if mode == "replace" else "CREATE TABLE"
+    trino_client.execute_update(f"{verb} {target} AS {guard.sql}", run_as=tenant)
     audit("derive", tenant=tenant, target=new_label, mode=mode, sql=guard.sql)
 
     # Only labels that actually exist as objects count as lineage parents.
     parents = [lbl for lbl in guard.referenced_labels if catalog.table_exists(tenant, lbl)]
-    registry.record_object(
+    ok = registry.record_object_guarded(
         tenant,
         new_label,
         table_ident=f"{settings.trino_catalog}.{tenant}.{new_label}",
         source=SourceKind.DERIVED.value,
         producing_sql=guard.sql,
         tags=tags or [],
+        lineage_parents=parents,  # object row + lineage commit in one transaction
     )
-    registry.set_lineage(tenant, new_label, parents)
+    if not ok:
+        return pending_object(
+            tenant, new_label, source=SourceKind.DERIVED,
+            producing_sql=guard.sql, parents=parents, tags=tags or [],
+        )
     return describe_object(tenant, new_label)

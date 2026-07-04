@@ -19,6 +19,15 @@ class ObjectExistsError(MemcoveError):
     """Raised when creating an object whose label already exists."""
 
 
+class SchemaMismatchError(MemcoveError):
+    """Raised when incoming data's schema is incompatible with an existing object.
+
+    A ``replace`` or ``append`` must keep the object's shape; changing columns or
+    types is rejected so downstream SQL never breaks silently. To change shape,
+    ``forget()`` the object then ``create()`` it fresh.
+    """
+
+
 class IngestError(MemcoveError):
     """Raised when an ingest source cannot be read or written."""
 

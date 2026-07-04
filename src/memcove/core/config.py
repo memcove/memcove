@@ -62,6 +62,18 @@ class Settings(BaseSettings):
     # Postgres registry
     pg_dsn: str = "postgresql://memcove:memcove@localhost:5433/memcove"
 
+    # Reconciler / read-repair (write-atomicity self-healing). The reconciler diffs the
+    # Iceberg catalog against the Postgres registry to backfill missing rows and drop
+    # dangling ones. Deletion is fail-safe: an empty/failed namespace listing deletes
+    # nothing, a row must be absent across this many consecutive sweeps before deletion,
+    # and a sweep that would delete more than the cap ratio of a namespace aborts + alerts.
+    reconcile_min_absent_sweeps: int = 2
+    reconcile_deletion_cap_ratio: float = 0.25
+    # The ratio cap only applies once a sweep would delete more than this many rows,
+    # so small namespaces can still clean up a single dangling row (1 of 2 rows is 50%
+    # but is not a mass deletion). The cap exists to stop a wipe, not routine cleanup.
+    reconcile_deletion_cap_min: int = 3
+
     # Guardrails
     preview_row_cap: int = 1000
     inline_bytes_cap: int = 8 * 1024 * 1024

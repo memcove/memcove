@@ -1,0 +1,4 @@
+# Documentation site toolchain (installed by the GitHub Pages workflow).
+# Kept separate from the app's pyproject.toml so docs deps never touch runtime.
+mkdocs-material>=9.5,<10
+pymdown-extensions>=10.7

@@ -25,3 +25,6 @@ internal/
 # macOS
 .DS_Store
 ROADMAP.md
+
+# mkdocs build output
+site/

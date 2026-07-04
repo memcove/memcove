@@ -1,0 +1,102 @@
+site_name: Memcove
+site_description: A lakehouse-backed data memory service for LLM agents, over MCP.
+site_url: https://memcove.github.io/memcove/
+site_author: Memcove
+copyright: Copyright &copy; Memcove contributors
+
+repo_url: https://github.com/memcove/memcove
+repo_name: memcove/memcove
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  language: en
+  icon:
+    repo: fontawesome/brands/github
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: teal
+      accent: teal
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: teal
+      accent: teal
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - navigation.instant
+    - navigation.tracking
+    - navigation.footer
+    - toc.follow
+    - content.code.copy
+    - content.code.annotate
+    - search.suggest
+    - search.highlight
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.snippets:
+      base_path: ["."]
+      check_paths: true
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/memcove/memcove
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - Quickstart: getting-started/quickstart.md
+      - Connect an MCP client: getting-started/connecting.md
+      - Walkthrough: getting-started/walkthrough.md
+  - Concepts:
+      - Architecture: concepts/architecture.md
+      - Tenant isolation & the SQL guard: concepts/isolation.md
+      - Security & trust boundary: concepts/security.md
+  - MCP Tools:
+      - Overview: tools/index.md
+      - Storing data: tools/storing.md
+      - Querying & deriving: tools/querying.md
+      - Reading & discovering: tools/reading.md
+      - Exporting: tools/exporting.md
+      - Streaming (Arrow Flight): tools/streaming.md
+      - Deleting: tools/deleting.md
+      - Resources: tools/resources.md
+  - Configuration:
+      - Settings reference: configuration/settings.md
+      - Authentication & tenancy: configuration/auth.md
+      - Local development (no proxy): configuration/local-dev.md
+  - Deployment:
+      - Production checklist: deployment/checklist.md
+      - Kubernetes: deployment/kubernetes.md
+  - Reference:
+      - CLI & entry points: reference/cli.md
+      - Changelog: changelog.md

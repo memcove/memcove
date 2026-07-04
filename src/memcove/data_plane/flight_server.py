@@ -15,8 +15,9 @@ descriptors/tickets and advertise this server's URI; clients do the streaming.
 
 Run standalone:  ``memcove-flight``  (or ``python -m memcove.data_plane.flight_server``)
 
-Security: tickets are unsigned for now (auth deferred — see core/tenancy.py);
-the tenant in the ticket is trusted exactly like the MCP request header today.
+Security: tickets/descriptors are HMAC-signed and short-lived (see tickets.sign /
+tickets.verify + flight_ticket_secret); a client cannot forge one for another
+tenant, and serve() warns if the signing secret is left at its insecure default.
 Memory note: DoPut currently buffers the stream server-side before the Iceberg
 commit; incremental per-batch commits are a future optimization.
 """

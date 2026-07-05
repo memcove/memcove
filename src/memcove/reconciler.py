@@ -188,10 +188,14 @@ def reconcile() -> SweepReport:
 def main() -> None:  # console-script entrypoint (memcove-reconcile)
     logging.basicConfig(level=logging.INFO)
     try:
-        registry.init_db()
-    except Exception as exc:  # noqa: BLE001 - init is best-effort if tables already exist
-        logger.warning("registry init failed (is postgres up?): %s", exc)
-    reconcile()
+        try:
+            registry.init_db()
+        except Exception as exc:  # noqa: BLE001 - init is best-effort if tables already exist
+            logger.warning("registry init failed (is postgres up?): %s", exc)
+        reconcile()
+    finally:
+        # Short-lived process: close the pool so psycopg_pool doesn't warn on GC.
+        registry.close_pool()
 
 
 if __name__ == "__main__":

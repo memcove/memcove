@@ -7,11 +7,13 @@ schema; this just adds what the catalog doesn't track conveniently.
 
 from __future__ import annotations
 
+import atexit
 import logging
 from typing import Any
 
 import psycopg
 from psycopg.rows import dict_row
+from psycopg_pool import ConnectionPool
 
 from memcove.core.config import get_settings
 
@@ -50,14 +52,72 @@ CREATE TABLE IF NOT EXISTS memcove_reconcile_tombstone (
 """
 
 
+_pool: ConnectionPool | None = None
+
+
+def _get_pool() -> ConnectionPool:
+    """Lazily open a process-wide connection pool.
+
+    Built on first use (not at import) so importing the registry never requires a
+    reachable Postgres. Keyed off the current settings' DSN; ``close_pool()`` resets it
+    if the DSN changes (e.g. between tests).
+
+    Fork note: the pool and its background threads do NOT survive ``os.fork()``. Every
+    current entrypoint is single-process (FastMCP streamable-http, pyarrow Flight's C++
+    threadpool, the reconciler CLI), so opening it eagerly in ``init_db()`` at startup is
+    safe. If this is ever deployed behind a preforking server (gunicorn/uvicorn
+    ``--workers>1`` or ``preload_app``), open the pool per worker (post-fork) or add a
+    post-fork ``close_pool()`` hook — a forked parent-built pool shares sockets and
+    orphans its maintenance threads.
+    """
+    global _pool
+    if _pool is None:
+        s = get_settings()
+        _pool = ConnectionPool(
+            s.pg_dsn,
+            min_size=s.pg_pool_min_size,
+            max_size=s.pg_pool_max_size,
+            timeout=s.pg_pool_timeout,
+            # Validate each connection on borrow. After a Postgres restart or an
+            # idle/firewall drop, a pooled socket goes dead; without this check the pool
+            # hands out the dead connection and the next query raises OperationalError
+            # (and the guarded write emits a FALSE "registry down" drift signal while the
+            # registry is actually up). The old connect-per-call path never had stale
+            # connections; check_connection keeps parity by discarding + replacing them.
+            check=ConnectionPool.check_connection,
+            name="memcove-registry",
+            open=True,
+        )
+        # Long-lived servers (MCP, Flight) have no explicit shutdown hook; release the
+        # pool cleanly at interpreter exit. Idempotent, so the reconciler's own
+        # close_pool() in a finally is unaffected.
+        atexit.register(close_pool)
+    return _pool
+
+
+def close_pool() -> None:
+    """Close and drop the pool (idempotent). For shutdown and test isolation."""
+    global _pool
+    if _pool is not None:
+        _pool.close()
+        _pool = None
+
+
 def _conn():
-    return psycopg.connect(get_settings().pg_dsn, autocommit=True)
+    """A pooled connection context manager. The ``with`` block commits on success and
+    rolls back on exception, then the connection is returned to the pool (not closed).
+
+    Formerly a fresh ``autocommit=True`` connection per call. Routing single-statement
+    ops through the pool's commit-on-exit context is equivalent, and it makes the few
+    multi-statement callers (e.g. ``delete_object``) atomic as a bonus.
+    """
+    return _get_pool().connection()
 
 
 def _conn_tx():
-    """A non-autocommit connection: the ``with`` block commits on success, rolls
-    back on exception. Used when several statements must land atomically."""
-    return psycopg.connect(get_settings().pg_dsn, autocommit=False)
+    """Alias of :func:`_conn` kept for call-site intent: several statements that must
+    land atomically. Both now share the pool and commit on clean ``with`` exit."""
+    return _get_pool().connection()
 
 
 def init_db() -> None:

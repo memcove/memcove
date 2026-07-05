@@ -61,6 +61,17 @@ class Settings(BaseSettings):
 
     # Postgres registry
     pg_dsn: str = "postgresql://memcove:memcove@localhost:5433/memcove"
+    # Connection pool: the registry opens a fresh connection per op otherwise, and the
+    # reconciler + synchronous read-repair add per-op churn. min_size connections are
+    # kept warm; the pool grows to max_size under load. pool_timeout bounds how long a
+    # caller waits for a free connection before raising (a subclass of OperationalError,
+    # so a saturated/unreachable registry is still swallowed by the guarded-write path).
+    # Kept at 10s (not psycopg_pool's 30s default) so an unreachable registry fails
+    # closer to the old connect-per-call fast-fail; registry ops are milliseconds, so a
+    # >10s wait for a free connection only happens during a real outage, not under load.
+    pg_pool_min_size: int = 1
+    pg_pool_max_size: int = 10
+    pg_pool_timeout: float = 10.0
 
     # Reconciler / read-repair (write-atomicity self-healing). The reconciler diffs the
     # Iceberg catalog against the Postgres registry to backfill missing rows and drop

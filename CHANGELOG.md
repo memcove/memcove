@@ -4,6 +4,17 @@ All notable changes to Memcove are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 semantic versioning once it reaches 1.0.
 
+## [0.3.1] - 2026-07-05
+
+### Changed
+- **Pooled Postgres connections** — the registry now backs its connection helpers with
+  a lazily-opened `psycopg_pool` pool instead of opening a fresh connection per op
+  (the reconciler and read-repair had raised per-op churn). Connections are health-
+  checked on borrow, so a Postgres restart or idle drop no longer hands a dead
+  connection to the next caller. Sizing/timeout via `MEMCOVE_PG_POOL_{MIN_SIZE,MAX_SIZE,TIMEOUT}`.
+  Write-atomicity is unaffected: pool timeouts subclass `OperationalError`, so a
+  saturated/unreachable registry is still swallowed as `metadata_pending`.
+
 ## [0.3.0] - 2026-07-05
 
 Write atomicity (M5). A crash or concurrent reader can no longer see a half-written

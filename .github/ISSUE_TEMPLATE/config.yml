@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/memcove/memcove/security/advisories/new
+    about: Please report security issues privately, not as public issues.
+  - name: Documentation
+    url: https://memcove.github.io/memcove/
+    about: Check the docs before filing — your question may be answered there.

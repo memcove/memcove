@@ -4,6 +4,22 @@ All notable changes to Memcove are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 semantic versioning once it reaches 1.0.
 
+## [0.3.3] - 2026-07-07
+
+### Added
+- **Open-source foundations** — `LICENSE` (Apache-2.0), `CONTRIBUTING.md`,
+  `CODE_OF_CONDUCT.md`, `SECURITY.md`, and GitHub issue/PR templates. `pyproject.toml`
+  now declares the license, classifiers, and project URLs.
+- **CI test/lint gate** — `.github/workflows/ci.yml` runs `ruff check` and the unit
+  suite on every PR, plus an integration job against the docker-compose stack. (The
+  existing `docs.yml` still handles the docs site.)
+
+### Changed
+- **Reproducible installs** — `uv.lock` is now committed (was gitignored).
+- **Local-stack reliability** — `docker-compose.yml` gives Trino a real healthcheck so
+  `docker compose up -d --wait` blocks until it's ready, replacing the "sleep ~20s"
+  guidance in the README and quickstart.
+
 ## [0.3.2] - 2026-07-06
 
 ### Changed

@@ -74,6 +74,17 @@ services:
         condition: service_started
     volumes:
       - ./infra/trino/etc/catalog:/etc/trino/catalog:ro
+    # Trino reports "starting":true until the coordinator is ready to serve queries.
+    # Gate readiness on that so `docker compose up -d --wait` blocks instead of the
+    # old "sleep ~20s" guess. (curl ships in the trinodb/trino UBI image.)
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - "curl -sf http://localhost:8080/v1/info | grep -q '\"starting\":false'"
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 15s
 
   postgres:
     image: postgres:16

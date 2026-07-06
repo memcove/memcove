@@ -1,0 +1,65 @@
+name: CI
+
+# Lint + tests on every PR and on pushes to main. The docs site has its own
+# workflow (docs.yml); this one gates code quality.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push to the same ref supersedes an in-flight run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - name: Install (frozen — uses the committed uv.lock)
+        run: uv sync --extra dev --frozen
+      - name: Ruff lint
+        run: uv run ruff check .
+      # NOTE: `ruff format --check` is intentionally not gated yet — the codebase
+      # uses a compact hand-formatting style that predates ruff-format adoption.
+      # Add it here after a dedicated one-shot `ruff format` normalization commit.
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - name: Install (frozen)
+        run: uv sync --extra dev --frozen
+      - name: Unit tests
+        run: uv run pytest -m "not integration" -q
+
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - name: Install (frozen)
+        run: uv sync --extra dev --frozen
+      - name: Bring up the local lakehouse
+        run: docker compose up -d --wait
+      - name: Integration tests
+        run: uv run pytest -m integration -q
+      - name: Tear down
+        if: always()
+        run: docker compose down -v

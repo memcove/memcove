@@ -11,7 +11,7 @@ catalog, Trino, and Postgres) in Docker, then start the MCP server.
 ## 1. Bring up the data plane
 
 ```bash
-docker compose up -d
+docker compose up -d --wait
 ```
 
 This starts five services (Compose project `memcove`):
@@ -24,7 +24,8 @@ This starts five services (Compose project `memcove`):
 | `trino` | `trinodb/trino` | 8080 | query engine (read / derive / export) |
 | `postgres` | `postgres:16` | 5433 | control-plane metadata & lineage registry |
 
-Give Trino ~20 seconds to become ready. The MinIO console is at
+The `--wait` flag blocks until every service (Trino included) reports healthy, so
+there's no need to guess at a startup delay. The MinIO console is at
 `http://localhost:9001` (user `minio`, password `minio12345`).
 
 ## 2. Install Memcove

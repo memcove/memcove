@@ -51,7 +51,7 @@ ships an `instructions` block framing the whole toolkit. Resources:
 
 ```bash
 # 1. bring up the local lakehouse (Trino + MinIO + Iceberg REST + Postgres)
-docker compose up -d        # give Trino ~20s to become ready
+docker compose up -d --wait  # blocks until Trino & friends report healthy
 
 # 2. install + configure
 uv sync --extra dev         # or: pip install -e ".[dev]"
@@ -98,3 +98,14 @@ uv run python scripts/pipeline_demo.py         # guided pipeline (always complet
 - **M3 (fast-follow):** Arrow Flight streaming data plane
   (`src/memcove/data_plane/flight_server.py`).
 - **Later:** real auth (bearer → OAuth 2.1) behind the `core/tenancy.py` seam.
+
+## Contributing
+
+Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for the dev
+setup, test/lint gates, and PR flow. By participating you agree to the
+[Code of Conduct](CODE_OF_CONDUCT.md). To report a security issue, see
+[SECURITY.md](SECURITY.md).
+
+## License
+
+Licensed under the [Apache License 2.0](LICENSE).

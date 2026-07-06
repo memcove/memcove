@@ -9,9 +9,8 @@ wheels/
 # Virtual environments
 .venv
 
-# Local config & lockfiles
+# Local config
 .env
-uv.lock
 
 # Test / pytest caches
 .pytest_cache/

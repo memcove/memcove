@@ -1,9 +1,20 @@
 [project]
 name = "memcove"
-version = "0.3.2"
+version = "0.3.3"
 description = "Memcove — a lakehouse-backed memory service for LLM agents, exposed over MCP"
 readme = "README.md"
 requires-python = ">=3.12"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: OS Independent",
+    "Topic :: Database",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 dependencies = [
     "mcp>=1.2.0",
     "orjson>=3.10.0",
@@ -26,7 +37,14 @@ dev = [
     "polars>=1.0.0",
     "requests>=2.32.0",
     "openai>=1.40.0",
+    "ruff>=0.6.0",
 ]
+
+[project.urls]
+Homepage = "https://memcove.github.io/memcove/"
+Repository = "https://github.com/memcove/memcove"
+Documentation = "https://memcove.github.io/memcove/"
+Changelog = "https://github.com/memcove/memcove/blob/main/CHANGELOG.md"
 
 [project.scripts]
 memcove-server = "memcove.server:main"

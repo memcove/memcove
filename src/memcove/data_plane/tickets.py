@@ -17,10 +17,11 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
-import json
 import secrets
 import time
 from typing import Any
+
+import orjson
 
 from memcove.core.config import get_settings
 from memcove.core.errors import TicketError
@@ -28,12 +29,12 @@ from memcove.core.errors import TicketError
 
 def encode(command: dict[str, Any]) -> bytes:
     """Serialize a command dict to compact JSON bytes."""
-    return json.dumps(command, separators=(",", ":")).encode("utf-8")
+    return orjson.dumps(command)
 
 
 def decode(raw: bytes) -> dict[str, Any]:
     """Parse ticket/descriptor bytes back into a dict (no verification)."""
-    return json.loads(bytes(raw).decode("utf-8"))
+    return orjson.loads(bytes(raw))
 
 
 def to_b64(command: dict[str, Any]) -> str:
@@ -45,7 +46,7 @@ def to_b64(command: dict[str, Any]) -> str:
 
 def _canon(obj: dict[str, Any]) -> bytes:
     """Deterministic bytes for signing (sorted keys, compact)."""
-    return json.dumps(obj, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    return orjson.dumps(obj, option=orjson.OPT_SORT_KEYS)
 
 
 def _sig(env: dict[str, Any]) -> str:

@@ -1,11 +1,12 @@
 [project]
 name = "memcove"
-version = "0.2.0"
+version = "0.3.2"
 description = "Memcove — a lakehouse-backed memory service for LLM agents, exposed over MCP"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "mcp>=1.2.0",
+    "orjson>=3.10.0",
     "trino>=0.330.0",
     "pyiceberg[s3fs,pyarrow]>=0.8.0",
     "pyarrow>=17.0.0",

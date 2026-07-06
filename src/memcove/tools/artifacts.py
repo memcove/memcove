@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import io
-import json
 import uuid
 
+import orjson
 import pyarrow.csv as pacsv
 
 from memcove.core import storage, trino_client
@@ -56,7 +56,7 @@ def export_artifact(
         size = storage.write_bytes(bucket, key, buf.getvalue(), "text/csv")
         content_type = "text/csv"
     else:  # json
-        payload = json.dumps(table.to_pylist(), default=str).encode("utf-8")
+        payload = orjson.dumps(table.to_pylist(), default=str)
         size = storage.write_bytes(bucket, key, payload, "application/json")
         content_type = "application/json"
 

@@ -56,7 +56,9 @@ jobs:
         id: version
         run: |
           REF="${{ github.event.inputs.tag || github.ref_name }}"
-          echo "value=${REF#v}" >> "$GITHUB_OUTPUT"
+          V="${REF#v}"
+          echo "value=$V" >> "$GITHUB_OUTPUT"
+          echo "minor=${V%.*}" >> "$GITHUB_OUTPUT"  # 0.3.4 -> 0.3
 
       - name: Image metadata (tags + labels)
         id: meta
@@ -65,9 +67,11 @@ jobs:
           images: |
             ${{ env.DOCKERHUB_IMAGE }}
             ${{ env.GHCR_IMAGE }}
+          # Derive tags from the explicit version (not the git ref) so this works
+          # on both a tag push and a manual workflow_dispatch re-run.
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=${{ steps.version.outputs.value }}
+            type=raw,value=${{ steps.version.outputs.minor }}
             type=raw,value=latest
 
       - name: Build and push (amd64 + arm64)

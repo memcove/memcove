@@ -63,3 +63,29 @@ jobs:
       - name: Tear down
         if: always()
         run: docker compose down -v
+
+  docker-build:
+    # Exercise the Dockerfile on every PR (build only, no push) so image breakage
+    # is caught here rather than at release time.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build image (amd64, no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: memcove:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Smoke-test /health
+        run: |
+          docker run -d --name memcove-ci -p 8090:8090 memcove:ci
+          for i in $(seq 1 20); do
+            if curl -sf http://localhost:8090/health >/dev/null; then echo "healthy"; break; fi
+            sleep 1
+          done
+          curl -sf http://localhost:8090/health | grep -q ok
+          docker rm -f memcove-ci

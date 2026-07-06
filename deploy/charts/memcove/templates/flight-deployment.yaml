@@ -1,0 +1,73 @@
+{{- if .Values.flight.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "memcove.fullname" . }}-flight
+  labels:
+    {{- include "memcove.labels" . | nindent 4 }}
+    app.kubernetes.io/component: flight
+spec:
+  replicas: {{ .Values.flight.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "memcove.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: flight
+  template:
+    metadata:
+      labels:
+        {{- include "memcove.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: flight
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "memcove.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: flight
+          image: {{ include "memcove.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["memcove-flight"]
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          ports:
+            - name: flight
+              containerPort: {{ .Values.flight.port }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "memcove.fullname" . }}-config
+            - secretRef:
+                name: {{ include "memcove.secretName" . }}
+          # Flight is a gRPC surface with no HTTP health route; probe the port.
+          livenessProbe:
+            tcpSocket:
+              port: flight
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            tcpSocket:
+              port: flight
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.flight.resources | nindent 12 }}
+      {{- with .Values.flight.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.flight.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.flight.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

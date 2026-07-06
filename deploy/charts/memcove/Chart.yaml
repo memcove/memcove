@@ -1,0 +1,17 @@
+apiVersion: v2
+name: memcove
+description: Lakehouse-backed memory service for LLM agents, exposed over MCP
+type: application
+# Chart version is independent of the app version and bumps on chart changes.
+version: 0.1.0
+appVersion: "0.4.0"
+home: https://memcove.github.io/memcove/
+sources:
+  - https://github.com/memcove/memcove
+keywords:
+  - mcp
+  - llm
+  - lakehouse
+  - iceberg
+  - trino
+kubeVersion: ">=1.25.0-0"

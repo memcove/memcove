@@ -80,19 +80,20 @@ def _assert_schema_compatible(
 @lru_cache
 def get_catalog() -> Catalog:
     s = get_settings()
-    return load_catalog(
-        s.iceberg_catalog_name,
-        **{
-            "type": "rest",
-            "uri": s.iceberg_rest_uri,
-            "warehouse": s.iceberg_warehouse,
-            "s3.endpoint": s.s3_endpoint,
-            "s3.access-key-id": s.s3_access_key,
-            "s3.secret-access-key": s.s3_secret_key,
-            "s3.region": s.s3_region,
-            "s3.path-style-access": str(s.s3_path_style).lower(),
-        },
-    )
+    props = {
+        "type": "rest",
+        "uri": s.iceberg_rest_uri,
+        "warehouse": s.iceberg_warehouse,
+        "s3.endpoint": s.s3_endpoint,
+        "s3.region": s.s3_region,
+        "s3.path-style-access": str(s.s3_path_style).lower(),
+    }
+    # Static keys only when set; otherwise PyIceberg's S3FileIO uses the AWS
+    # default credential chain (IRSA / instance profile / env / STS).
+    creds = s.static_s3_credentials()
+    if creds:
+        props["s3.access-key-id"], props["s3.secret-access-key"] = creds
+    return load_catalog(s.iceberg_catalog_name, **props)
 
 
 def ensure_namespace(namespace: str) -> None:

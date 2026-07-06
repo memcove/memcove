@@ -1,0 +1,158 @@
+# Default values for the Memcove chart.
+# Memcove is bring-your-own-infra: point it at your own S3, Iceberg REST catalog,
+# Trino (>= 431), and registry DB. Secrets should come from your secret manager
+# (see `secrets.existingSecret`), not this file.
+
+image:
+  repository: andrzejgluszynski/memcove
+  # Defaults to .Chart.appVersion when empty.
+  tag: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  name: ""
+  # For AWS IRSA, set the role ARN here and leave secrets.s3AccessKey/s3SecretKey
+  # empty so Memcove uses the pod's IAM role instead of static keys:
+  #   eks.amazonaws.com/role-arn: arn:aws:iam::<acct>:role/<role>
+  annotations: {}
+
+podAnnotations: {}
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 999
+  fsGroup: 999
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+# ---------------------------------------------------------------- workloads
+
+# Control-plane MCP server (Streamable HTTP on :8090).
+server:
+  replicaCount: 1
+  port: 8090
+  resources: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  service:
+    type: ClusterIP
+    port: 8090
+  # Probes hit the built-in /health and /ready endpoints.
+  livenessProbe:
+    httpGet:
+      path: /health
+      port: http
+    initialDelaySeconds: 10
+    periodSeconds: 15
+  readinessProbe:
+    httpGet:
+      path: /ready
+      port: http
+    initialDelaySeconds: 5
+    periodSeconds: 10
+
+# Arrow Flight streaming data plane (gRPC on :8815). Disable if unused.
+flight:
+  enabled: true
+  replicaCount: 1
+  port: 8815
+  # What clients are told to dial. Point at the flight Service's cluster DNS.
+  advertiseUri: ""
+  resources: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  service:
+    type: ClusterIP
+    port: 8815
+
+# Reconciler that heals registry/catalog drift. Runs as a CronJob.
+reconcile:
+  enabled: true
+  schedule: "*/30 * * * *"
+  resources: {}
+  restartPolicy: Never
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+
+# ---------------------------------------------------------------- app config
+# Non-secret MEMCOVE_* settings → rendered into a ConfigMap. Every key maps to a
+# MEMCOVE_<UPPER_SNAKE> env var.
+
+config:
+  s3:
+    endpoint: https://s3.us-east-1.amazonaws.com
+    region: us-east-1
+    pathStyle: false
+    warehouseBucket: my-memcove-warehouse
+    stagingBucket: my-memcove-staging
+    artifactsBucket: my-memcove-artifacts
+  iceberg:
+    restUri: http://iceberg-rest.internal:8181
+    warehouse: s3://my-memcove-warehouse/
+    catalogName: memcove
+  trino:
+    host: trino.internal
+    port: 443
+    httpScheme: https
+    user: memcove
+    catalog: iceberg
+    impersonation: true
+  tenancy:
+    # Set by your auth proxy; clients cannot spoof it. See docs/configuration/auth.md.
+    tenantHeader: x-memcove-tenant
+    defaultTenant: default
+    subjectHeader: ""
+    groupHeader: ""
+  flight:
+    ticketTtlSeconds: 300
+  # Read-only shared reference schemas (JSON list).
+  sharedSchemas:
+    - ref_market
+  # Empty list = agent s3_parquet ingest disabled (fail closed).
+  allowedS3IngestPrefixes: []
+  # Extra raw MEMCOVE_* env (escape hatch for settings not surfaced above).
+  extraEnv: {}
+
+# ---------------------------------------------------------------- secrets
+# Sensitive values. STRONGLY prefer an existing Secret from your secret manager.
+secrets:
+  # Name of a pre-created Secret holding MEMCOVE_S3_ACCESS_KEY, MEMCOVE_S3_SECRET_KEY,
+  # MEMCOVE_PG_DSN, MEMCOVE_FLIGHT_TICKET_SECRET. When set, `values` below are ignored.
+  existingSecret: ""
+  # Otherwise the chart creates a Secret from these (dev / test only).
+  # Leave s3AccessKey / s3SecretKey EMPTY to use IRSA / the default credential chain.
+  values:
+    s3AccessKey: ""
+    s3SecretKey: ""
+    pgDsn: ""
+    flightTicketSecret: ""
+
+# ---------------------------------------------------------------- networking
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts: []
+  #  - host: memcove.example.com
+  #    paths:
+  #      - path: /
+  #        pathType: Prefix
+  tls: []
+
+# Restrict ingress to the MCP + Flight ports to only the auth proxy pod. Memcove
+# must never be exposed directly. Adapt the selector to your proxy's labels.
+networkPolicy:
+  enabled: false
+  proxyPodSelector:
+    matchLabels:
+      app: oidc-proxy

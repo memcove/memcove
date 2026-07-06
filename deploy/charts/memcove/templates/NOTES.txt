@@ -1,0 +1,27 @@
+Memcove {{ .Chart.AppVersion }} deployed as release "{{ .Release.Name }}".
+
+Control-plane MCP server:
+  Service: {{ include "memcove.fullname" . }}-server:{{ .Values.server.service.port }} (in namespace {{ .Release.Namespace }})
+  MCP endpoint: http://<service>:{{ .Values.server.service.port }}/mcp
+  Health:  /health (liveness)   Ready: /ready (readiness)
+
+{{- if .Values.flight.enabled }}
+Arrow Flight data plane:
+  Service: {{ include "memcove.fullname" . }}-flight:{{ .Values.flight.service.port }} (gRPC)
+{{- end }}
+
+IMPORTANT — trust boundary:
+  Memcove trusts a tenant identity in request headers set by an auth proxy; it does
+  not validate tokens itself. Do NOT expose it directly. Put an authenticating proxy
+  in front and{{ if not .Values.networkPolicy.enabled }} enable networkPolicy (currently disabled) to{{ end }} restrict ingress to that proxy.
+
+{{- if not .Values.secrets.existingSecret }}
+
+WARNING: using a chart-managed Secret. For production, set secrets.existingSecret to
+a Secret from your secret manager (S3 keys, MEMCOVE_PG_DSN, MEMCOVE_FLIGHT_TICKET_SECRET).
+{{- end }}
+{{- if and (not .Values.secrets.existingSecret) (not .Values.secrets.values.flightTicketSecret) }}
+
+WARNING: MEMCOVE_FLIGHT_TICKET_SECRET is empty — the server will run with an insecure
+default. Set a strong random value before accepting real traffic.
+{{- end }}

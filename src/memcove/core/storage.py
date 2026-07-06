@@ -20,17 +20,20 @@ from memcove.core.config import Settings, get_settings
 @lru_cache
 def _client():
     s = get_settings()
-    return boto3.client(
-        "s3",
+    kwargs: dict = dict(
         endpoint_url=s.s3_endpoint,
         region_name=s.s3_region,
-        aws_access_key_id=s.s3_access_key,
-        aws_secret_access_key=s.s3_secret_key,
         config=Config(
             signature_version="s3v4",
             s3={"addressing_style": "path" if s.s3_path_style else "auto"},
         ),
     )
+    # Pass static keys only when set; otherwise boto3 uses its default credential
+    # chain (IRSA / instance profile / env / STS) for a keyless AWS deployment.
+    creds = s.static_s3_credentials()
+    if creds:
+        kwargs["aws_access_key_id"], kwargs["aws_secret_access_key"] = creds
+    return boto3.client("s3", **kwargs)
 
 
 def _settings() -> Settings:

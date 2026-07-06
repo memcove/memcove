@@ -1,0 +1,25 @@
+{{- if .Values.networkPolicy.enabled }}
+# Only the auth proxy may reach the MCP (:8090) and Flight (:8815) ports.
+# Memcove trusts proxy-set headers, so it must never be reachable directly.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "memcove.fullname" . }}
+  labels:
+    {{- include "memcove.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "memcove.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            {{- toYaml .Values.networkPolicy.proxyPodSelector | nindent 12 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.server.port }}
+        - protocol: TCP
+          port: {{ .Values.flight.port }}
+{{- end }}

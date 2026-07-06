@@ -89,6 +89,10 @@ jobs:
   pypi:
     runs-on: ubuntu-latest
     environment: pypi
+    # Best-effort: a PyPI misconfig must not block the image + GitHub Release.
+    # continue-on-error keeps the run green and lets github-release proceed; the
+    # step still shows red in the UI as a reminder. Tighten once PyPI is verified.
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
         with:

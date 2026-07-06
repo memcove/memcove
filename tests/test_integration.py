@@ -37,6 +37,31 @@ def _stack_up():
     registry.init_db()
 
 
+def _reset_tenant(tenant: str) -> None:
+    """Drop every dataset (Iceberg table + registry row + tombstone) for a tenant."""
+    for label in catalog.list_labels(tenant):
+        try:
+            catalog.drop_table(tenant, label)
+        except Exception:  # noqa: BLE001 - best-effort cleanup; ignore races/absent
+            pass
+    for label in registry.labels_for_tenant(tenant):
+        registry.delete_object(tenant, label)
+    for label in list(registry.tombstones_for_tenant(tenant)):
+        registry.clear_tombstone(tenant, label)
+
+
+@pytest.fixture(autouse=True)
+def _clean_tenant(_stack_up):
+    """Reset the test tenant before each test.
+
+    The compose stack is persistent and there's no per-test teardown, so without
+    this a dataset created by one test (e.g. ``people_a``) leaks into the next and
+    breaks ``mode="create"`` cases. Resetting up front makes the suite
+    order-independent and rerunnable against the same stack.
+    """
+    _reset_tenant(TENANT)
+
+
 def _seed():
     ingest.ingest_object(
         TENANT, "people",

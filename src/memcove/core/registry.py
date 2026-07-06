@@ -125,6 +125,17 @@ def init_db() -> None:
         cur.execute(_DDL)
 
 
+def ping() -> None:
+    """Cheap liveness probe for the registry — raises if the DB is unreachable.
+
+    Used by the server's ``/ready`` endpoint. Borrows a pooled connection (which
+    is health-checked on borrow) and runs a trivial query.
+    """
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT 1")
+        cur.fetchone()
+
+
 def _record_object_stmt(
     cur,
     tenant: str,

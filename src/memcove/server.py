@@ -9,10 +9,14 @@ namespace (datasets are private per tenant).
 from __future__ import annotations
 
 import logging
+import socket
 from typing import Annotated, Any, Literal
 
 from mcp.server.fastmcp import Context, FastMCP
 from pydantic import Field
+from starlette.concurrency import run_in_threadpool
+from starlette.requests import Request
+from starlette.responses import JSONResponse, PlainTextResponse
 
 from memcove.core import registry
 from memcove.core.config import get_settings
@@ -390,6 +394,47 @@ def dataset_resource(tenant: str, name: str) -> dict:
 def catalog_resource(tenant: str) -> dict:
     """List all datasets for a tenant."""
     return {"datasets": objects_tool.list_objects(normalize_tenant(tenant))}
+
+
+# ------------------------------------------------------------------- health probes
+
+
+@mcp.custom_route("/health", methods=["GET"])
+async def health(_request: Request) -> PlainTextResponse:
+    """Liveness: the process is up and serving HTTP. No dependency checks, so a
+    slow/down backend never triggers a pod restart."""
+    return PlainTextResponse("ok")
+
+
+def _trino_reachable() -> bool:
+    try:
+        with socket.create_connection((settings.trino_host, settings.trino_port), timeout=2):
+            return True
+    except OSError:
+        return False
+
+
+@mcp.custom_route("/ready", methods=["GET"])
+async def ready(_request: Request) -> JSONResponse:
+    """Readiness: the dependencies the control plane needs are reachable.
+
+    Checks the metadata registry (a real ``SELECT 1``) and Trino (socket reach).
+    Returns 503 with per-check detail if anything is down so k8s holds traffic
+    off the pod until it can actually serve. Blocking checks run in a thread so
+    the event loop is never stalled.
+    """
+    checks: dict[str, str] = {}
+
+    try:
+        await run_in_threadpool(registry.ping)
+        checks["registry"] = "ok"
+    except Exception as exc:  # noqa: BLE001 - report any failure as not-ready
+        checks["registry"] = f"error: {exc}"
+
+    checks["trino"] = "ok" if await run_in_threadpool(_trino_reachable) else "unreachable"
+
+    is_ready = all(v == "ok" for v in checks.values())
+    return JSONResponse({"ready": is_ready, "checks": checks}, status_code=200 if is_ready else 503)
 
 
 # ---------------------------------------------------------------------------- main

@@ -1,0 +1,31 @@
+# Keep the build context small — only pyproject/lock, src, README, LICENSE are used.
+.git
+.github
+.venv
+.env
+.env.example
+.ruff_cache
+.pytest_cache
+__pycache__
+*.py[oc]
+build
+dist
+wheels
+*.egg-info
+
+# Not needed at runtime
+tests
+scripts
+docs
+site
+infra
+deploy
+internal
+*.md
+!README.md
+docker-compose.yml
+Dockerfile
+.dockerignore
+mkdocs.yml
+CHANGELOG.md
+ROADMAP.md

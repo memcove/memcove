@@ -4,6 +4,22 @@ All notable changes to Memcove are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 semantic versioning once it reaches 1.0.
 
+## [0.3.4] - 2026-07-07
+
+### Added
+- **Container image** — a multi-stage `Dockerfile` (non-root, `python:3.12-slim`,
+  deps installed frozen from `uv.lock`) shipping all three entrypoints
+  (`memcove-server` default, `memcove-flight`, `memcove-reconcile`). Plus a
+  `.dockerignore`.
+- **`/health` and `/ready` HTTP endpoints** on the MCP server — liveness always
+  returns 200; readiness checks the metadata registry (`SELECT 1`) and Trino
+  reachability and returns 503 with per-check detail when a dependency is down.
+  Wire these to Kubernetes probes. Adds `registry.ping()`.
+- **Release automation** — `.github/workflows/release.yml`: on a `v*` tag, builds a
+  multi-arch (amd64+arm64) image and pushes to Docker Hub + GHCR, publishes the wheel
+  to PyPI (trusted publishing), and creates a GitHub Release from the CHANGELOG. CI now
+  also builds the image and smoke-tests `/health` on every PR.
+
 ## [0.3.3] - 2026-07-07
 
 ### Added

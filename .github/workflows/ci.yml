@@ -56,10 +56,12 @@ jobs:
           enable-cache: true
       - name: Install (frozen)
         run: uv sync --extra dev --frozen
-      - name: Bring up the local lakehouse
+      - name: Bring up the local lakehouse (incl. Postgres + MySQL)
         run: docker compose up -d --wait
       - name: Integration tests
         run: uv run pytest -m integration -q
+      - name: Registry backend tests (Postgres + MySQL + SQLite)
+        run: uv run pytest tests/test_registry_backends.py -q
       - name: Tear down
         if: always()
         run: docker compose down -v

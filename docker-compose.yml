@@ -104,6 +104,27 @@ services:
     volumes:
       - pg-data:/var/lib/postgresql/data
 
+  # Alternative registry backend, for exercising the MySQL path (the registry is
+  # pluggable: Postgres | SQLite | MySQL). Not used by the default stack wiring.
+  mysql:
+    image: mysql:8
+    container_name: memcove-mysql
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: memcove
+      MYSQL_USER: memcove
+      MYSQL_PASSWORD: memcove
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -proot --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    volumes:
+      - mysql-data:/var/lib/mysql
+
 volumes:
   minio-data:
   pg-data:
+  mysql-data:

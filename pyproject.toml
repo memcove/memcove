@@ -1,6 +1,6 @@
 [project]
 name = "memcove"
-version = "0.4.0"
+version = "0.5.0"
 description = "Memcove — a lakehouse-backed memory service for LLM agents, exposed over MCP"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -31,6 +31,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# MySQL registry backend (Postgres via psycopg is a core dep; SQLite is stdlib).
+mysql = [
+    "pymysql>=1.1.0",
+]
 dev = [
     "pytest>=8.2.0",
     "pytest-asyncio>=0.23.0",
@@ -38,6 +42,7 @@ dev = [
     "requests>=2.32.0",
     "openai>=1.40.0",
     "ruff>=0.6.0",
+    "pymysql>=1.1.0",
 ]
 
 [project.urls]

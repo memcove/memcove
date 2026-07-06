@@ -4,6 +4,24 @@ All notable changes to Memcove are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 semantic versioning once it reaches 1.0.
 
+## [0.5.0] - 2026-07-07
+
+### Added
+- **Pluggable registry backend** — the metadata registry now runs on **SQLite**,
+  **Postgres**, or **MySQL**, selected by the DSN scheme via a new
+  `MEMCOVE_REGISTRY_DSN` (falls back to `MEMCOVE_PG_DSN`). SQLite (embedded, stdlib)
+  gives zero-setup local dev with no Postgres container; MySQL needs the `mysql` extra
+  (`pip install memcove[mysql]`). Backends live behind `core/registry_backends.py`; the
+  `registry.*` API is unchanged. The guarded-write "registry down → metadata_pending"
+  contract is preserved per backend.
+
+### Changed
+- **Portable tags storage** — object tags moved from a Postgres-only `text[]` column to
+  a `memcove_object_tags` child table so tag filtering works on all three backends.
+  (No data migration path is provided; this predates any external release.)
+- `docker-compose.yml` adds a MySQL service for exercising that backend; CI runs the
+  registry suite against Postgres + MySQL + SQLite.
+
 ## [0.4.0] - 2026-07-07
 
 ### Added

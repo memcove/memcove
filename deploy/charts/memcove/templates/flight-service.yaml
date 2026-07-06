@@ -1,0 +1,19 @@
+{{- if .Values.flight.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "memcove.fullname" . }}-flight
+  labels:
+    {{- include "memcove.labels" . | nindent 4 }}
+    app.kubernetes.io/component: flight
+spec:
+  type: {{ .Values.flight.service.type }}
+  selector:
+    {{- include "memcove.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: flight
+  ports:
+    - name: flight
+      port: {{ .Values.flight.service.port }}
+      targetPort: flight
+      protocol: TCP
+{{- end }}

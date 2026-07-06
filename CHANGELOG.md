@@ -4,6 +4,21 @@ All notable changes to Memcove are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 semantic versioning once it reaches 1.0.
 
+## [0.4.0] - 2026-07-07
+
+### Added
+- **Helm chart** (`deploy/charts/memcove`) — installable chart with the control-plane
+  server (Deployment + Service, wired to the `/health` and `/ready` probes), the Arrow
+  Flight data plane (Deployment + Service, TCP probes), and the reconciler (CronJob).
+  Config renders to a ConfigMap; secrets come from an `existingSecret` (recommended) or
+  a chart-managed one. Includes optional NetworkPolicy (proxy-only ingress) and Ingress,
+  a ServiceAccount for **AWS IRSA**, and non-root pod/container security contexts. The
+  release workflow now packages and pushes the chart to GHCR as an OCI artifact.
+- **Keyless S3 credentials** — clearing `MEMCOVE_S3_ACCESS_KEY` / `MEMCOVE_S3_SECRET_KEY`
+  now falls back to the AWS default credential chain (IRSA / instance profile / env / STS)
+  for both the boto3 storage client and PyIceberg, instead of requiring static keys. Adds
+  `Settings.static_s3_credentials()`.
+
 ## [0.3.4] - 2026-07-07
 
 ### Added

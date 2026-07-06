@@ -105,6 +105,23 @@ jobs:
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
 
+  helm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+      - uses: azure/setup-helm@v4
+      - name: Package and push chart to GHCR (OCI)
+        env:
+          VERSION: ${{ github.event.inputs.tag && github.event.inputs.tag || github.ref_name }}
+        run: |
+          V="${VERSION#v}"
+          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u ${{ github.actor }} --password-stdin
+          # Chart version tracks the app version so each release publishes a matching chart.
+          helm package deploy/charts/memcove --version "$V" --app-version "$V" -d dist
+          helm push "dist/memcove-$V.tgz" oci://ghcr.io/memcove/charts
+
   github-release:
     runs-on: ubuntu-latest
     needs: [image, pypi]

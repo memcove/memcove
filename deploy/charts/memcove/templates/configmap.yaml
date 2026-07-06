@@ -1,0 +1,49 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "memcove.fullname" . }}-config
+  labels:
+    {{- include "memcove.labels" . | nindent 4 }}
+data:
+  MEMCOVE_HOST: "0.0.0.0"
+  MEMCOVE_PORT: {{ .Values.server.port | quote }}
+  MEMCOVE_FLIGHT_HOST: "0.0.0.0"
+  MEMCOVE_FLIGHT_PORT: {{ .Values.flight.port | quote }}
+  {{- with .Values.flight.advertiseUri }}
+  MEMCOVE_FLIGHT_ADVERTISE_URI: {{ . | quote }}
+  {{- end }}
+  MEMCOVE_FLIGHT_TICKET_TTL_SECONDS: {{ .Values.config.flight.ticketTtlSeconds | quote }}
+
+  # Object store
+  MEMCOVE_S3_ENDPOINT: {{ .Values.config.s3.endpoint | quote }}
+  MEMCOVE_S3_REGION: {{ .Values.config.s3.region | quote }}
+  MEMCOVE_S3_PATH_STYLE: {{ .Values.config.s3.pathStyle | quote }}
+  MEMCOVE_WAREHOUSE_BUCKET: {{ .Values.config.s3.warehouseBucket | quote }}
+  MEMCOVE_STAGING_BUCKET: {{ .Values.config.s3.stagingBucket | quote }}
+  MEMCOVE_ARTIFACTS_BUCKET: {{ .Values.config.s3.artifactsBucket | quote }}
+
+  # Iceberg REST catalog
+  MEMCOVE_ICEBERG_REST_URI: {{ .Values.config.iceberg.restUri | quote }}
+  MEMCOVE_ICEBERG_WAREHOUSE: {{ .Values.config.iceberg.warehouse | quote }}
+  MEMCOVE_ICEBERG_CATALOG_NAME: {{ .Values.config.iceberg.catalogName | quote }}
+
+  # Trino
+  MEMCOVE_TRINO_HOST: {{ .Values.config.trino.host | quote }}
+  MEMCOVE_TRINO_PORT: {{ .Values.config.trino.port | quote }}
+  MEMCOVE_TRINO_HTTP_SCHEME: {{ .Values.config.trino.httpScheme | quote }}
+  MEMCOVE_TRINO_USER: {{ .Values.config.trino.user | quote }}
+  MEMCOVE_TRINO_CATALOG: {{ .Values.config.trino.catalog | quote }}
+  MEMCOVE_TRINO_IMPERSONATION: {{ .Values.config.trino.impersonation | quote }}
+
+  # Tenancy
+  MEMCOVE_TENANT_HEADER: {{ .Values.config.tenancy.tenantHeader | quote }}
+  MEMCOVE_DEFAULT_TENANT: {{ .Values.config.tenancy.defaultTenant | quote }}
+  MEMCOVE_TENANT_SUBJECT_HEADER: {{ .Values.config.tenancy.subjectHeader | quote }}
+  MEMCOVE_TENANT_GROUP_HEADER: {{ .Values.config.tenancy.groupHeader | quote }}
+
+  # JSON-typed settings (pydantic parses these as JSON).
+  MEMCOVE_SHARED_SCHEMAS: {{ .Values.config.sharedSchemas | toJson | quote }}
+  MEMCOVE_ALLOWED_S3_INGEST_PREFIXES: {{ .Values.config.allowedS3IngestPrefixes | toJson | quote }}
+  {{- range $k, $v := .Values.config.extraEnv }}
+  {{ $k }}: {{ $v | quote }}
+  {{- end }}

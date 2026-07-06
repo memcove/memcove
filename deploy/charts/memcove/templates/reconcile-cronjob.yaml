@@ -1,0 +1,44 @@
+{{- if .Values.reconcile.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "memcove.fullname" . }}-reconcile
+  labels:
+    {{- include "memcove.labels" . | nindent 4 }}
+    app.kubernetes.io/component: reconcile
+spec:
+  schedule: {{ .Values.reconcile.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: {{ .Values.reconcile.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.reconcile.failedJobsHistoryLimit }}
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            {{- include "memcove.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: reconcile
+        spec:
+          serviceAccountName: {{ include "memcove.serviceAccountName" . }}
+          restartPolicy: {{ .Values.reconcile.restartPolicy }}
+          {{- with .Values.imagePullSecrets }}
+          imagePullSecrets:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          securityContext:
+            {{- toYaml .Values.podSecurityContext | nindent 12 }}
+          containers:
+            - name: reconcile
+              image: {{ include "memcove.image" . }}
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              command: ["memcove-reconcile"]
+              securityContext:
+                {{- toYaml .Values.securityContext | nindent 16 }}
+              envFrom:
+                - configMapRef:
+                    name: {{ include "memcove.fullname" . }}-config
+                - secretRef:
+                    name: {{ include "memcove.secretName" . }}
+              resources:
+                {{- toYaml .Values.reconcile.resources | nindent 16 }}
+{{- end }}

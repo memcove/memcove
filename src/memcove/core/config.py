@@ -24,11 +24,14 @@ class Settings(BaseSettings):
     iceberg_warehouse: str = "s3://warehouse/"
     iceberg_catalog_name: str = "memcove"
 
-    # Object store
+    # Object store. Access/secret keys default to the local MinIO dev creds. Clear
+    # them (empty string) to fall back to the AWS default credential chain — IRSA,
+    # instance profile, env vars, or STS — for a keyless deployment. See
+    # static_s3_credentials().
     s3_endpoint: str = "http://localhost:9000"
     s3_region: str = "us-east-1"
-    s3_access_key: str = "minio"
-    s3_secret_key: str = "minio12345"
+    s3_access_key: str | None = "minio"
+    s3_secret_key: str | None = "minio12345"
     s3_path_style: bool = True
     warehouse_bucket: str = "warehouse"
     staging_bucket: str = "memcove-staging"
@@ -114,6 +117,18 @@ class Settings(BaseSettings):
     # prefixes. Empty list = agent s3_parquet ingest is DISABLED (fail closed) to avoid
     # a confused-deputy read of any bucket the service credential can reach.
     allowed_s3_ingest_prefixes: list[str] = []
+
+    def static_s3_credentials(self) -> tuple[str, str] | None:
+        """The explicit S3 access/secret key pair, or ``None`` to defer to the AWS
+        default credential chain (IRSA / instance profile / env / STS).
+
+        Both keys must be non-empty to count as static creds; an empty string on
+        either clears them, so an IRSA deployment just sets the keys to empty and
+        omits static credentials entirely.
+        """
+        if self.s3_access_key and self.s3_secret_key:
+            return self.s3_access_key, self.s3_secret_key
+        return None
 
 
 @lru_cache

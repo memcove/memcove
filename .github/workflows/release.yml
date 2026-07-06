@@ -24,7 +24,8 @@ permissions:
   id-token: write # PyPI trusted publishing
 
 env:
-  DOCKERHUB_IMAGE: memcove/memcove
+  # Docker Hub repo lives under the maintainer's personal namespace.
+  DOCKERHUB_IMAGE: andrzejgluszynski/memcove
   GHCR_IMAGE: ghcr.io/memcove/memcove
 
 jobs:

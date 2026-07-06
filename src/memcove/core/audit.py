@@ -8,8 +8,9 @@ request, so serialization failures are swallowed.
 
 from __future__ import annotations
 
-import json
 import logging
+
+import orjson
 
 _log = logging.getLogger("memcove.audit")
 
@@ -17,6 +18,10 @@ _log = logging.getLogger("memcove.audit")
 def audit(event: str, **fields) -> None:
     """Emit a single structured audit record."""
     try:
-        _log.info(json.dumps({"event": event, **fields}, default=str, sort_keys=True))
+        _log.info(
+            orjson.dumps(
+                {"event": event, **fields}, default=str, option=orjson.OPT_SORT_KEYS
+            ).decode()
+        )
     except Exception:  # noqa: BLE001 - auditing is best-effort, never fatal
         _log.info("audit event=%s (unserializable fields)", event)

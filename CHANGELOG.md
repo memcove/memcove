@@ -4,6 +4,18 @@ All notable changes to Memcove are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 semantic versioning once it reaches 1.0.
 
+## [0.3.2] - 2026-07-06
+
+### Changed
+- **orjson for JSON serialization** — the Flight ticket codec (`data_plane/tickets.py`),
+  the structured audit log (`core/audit.py`), and the JSON artifact export
+  (`tools/artifacts.py`) now serialize/parse with `orjson` instead of the stdlib `json`
+  module. orjson was already installed transitively (via `trino`) and is now a declared
+  dependency. Signing is unaffected — HMAC canonicalization uses `orjson.OPT_SORT_KEYS`
+  on both the sign and verify paths. One behavior change: JSON exports now render
+  `datetime`/`UUID` values as native ISO 8601 (e.g. `2024-01-01T00:00:00`) rather than
+  Python `str()`; `Decimal`/`bytes` still fall through to `default=str` unchanged.
+
 ## [0.3.1] - 2026-07-05
 
 ### Changed

@@ -23,15 +23,17 @@ The agent works with data **by name**, and the data itself stays out of its cont
 
 1. **Remember** a dataset under a name — inline rows, an `s3://` parquet file, or a direct
    upload.
-2. **Derive** new datasets from it with plain SQL — joins, aggregations, filters — which
-   Memcove runs and records the lineage of.
+2. **Derive** new datasets from it with plain SQL — **joins and aggregations over datasets
+   far too big to fit in a prompt** (millions to billions of rows, across many tables) —
+   which Memcove runs in the lakehouse and records the lineage of.
 3. **Read back** only what's needed: a small capped preview, or a download link for the
    full result.
 
-The data — gigabytes if it needs to be — lives in a real data lakehouse and **never passes
-through the model's context**. The agent only ever sees dataset names, small previews, and
-links. Memory is **durable across sessions**, and every agent (tenant) is **isolated** from
-the others.
+The data — gigabytes or more — lives in a real data lakehouse and **never passes through
+the model's context**. Because the heavy work (the joins, the group-bys, the rollups) runs
+in a distributed query engine over that lakehouse, the agent can crunch datasets orders of
+magnitude larger than its context window and still get back only a small summary. Memory is
+**durable across sessions**, and every agent (tenant) is **isolated** from the others.
 
 ## How it works
 

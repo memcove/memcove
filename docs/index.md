@@ -1,13 +1,24 @@
 # Memcove
 
-**Memcove is persistent, queryable data memory for LLM agents.** Instead of holding
-tabular data in the conversation, an agent stores it as named datasets that survive
-across turns and other agents, then computes over them with SQL — joins, rollups,
-filters — and hands back previews, files, or live Arrow streams.
+**Durable, queryable data memory for LLM agents — so they can work with real datasets
+instead of stuffing everything into their context window.**
+
+When an agent works with tabular data — a dataframe, a query result, millions of rows of
+logs — its only working memory is the context window: the data either gets pasted into the
+prompt (token-expensive, lossy, size-capped) or vanishes when the session ends.
+
+Memcove gives the agent somewhere to put it. It **remembers** datasets by name, runs
+**joins and aggregations over data far too large to fit in a prompt** — millions to
+billions of rows, across many tables — with plain SQL, and hands back only what's needed: a
+capped preview, a downloadable file, or a live Arrow stream. The data lives in a real
+lakehouse and **never passes through the model's context**; the agent only ever sees names,
+previews, and links. Memory is durable across turns and other agents, and every tenant is
+isolated.
 
 It speaks the [Model Context Protocol (MCP)](https://modelcontextprotocol.io), so any
-MCP-capable agent can use it as a tool. Underneath, datasets are Apache Iceberg tables
-in an object store, queried through Trino.
+MCP-capable agent can use it as a tool. Underneath, datasets are Apache Iceberg tables in an
+object store, queried through **Trino — a distributed engine, which is what lets those
+joins and rollups scale** far past anything a context window could hold.
 
 ```text
   1. remember_dataset   store a dataframe / file / query result

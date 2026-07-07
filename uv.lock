@@ -798,7 +798,7 @@ wheels = [
 
 [[package]]
 name = "memcove"
-version = "0.5.0"
+version = "0.6.0"
 source = { editable = "." }
 dependencies = [
     { name = "boto3" },
@@ -809,6 +809,7 @@ dependencies = [
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "pyiceberg", extra = ["pyarrow", "s3fs"] },
+    { name = "pyjwt", extra = ["crypto"] },
     { name = "sqlglot" },
     { name = "starlette" },
     { name = "trino" },
@@ -841,6 +842,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.7.0" },
     { name = "pydantic-settings", specifier = ">=2.3.0" },
     { name = "pyiceberg", extras = ["s3fs", "pyarrow"], specifier = ">=0.8.0" },
+    { name = "pyjwt", extras = ["crypto"], specifier = ">=2.8.0" },
     { name = "pymysql", marker = "extra == 'dev'", specifier = ">=1.1.0" },
     { name = "pymysql", marker = "extra == 'mysql'", specifier = ">=1.1.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.2.0" },

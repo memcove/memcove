@@ -1,6 +1,6 @@
 [project]
 name = "memcove"
-version = "0.5.0"
+version = "0.6.0"
 description = "Memcove — a lakehouse-backed memory service for LLM agents, exposed over MCP"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -28,6 +28,7 @@ dependencies = [
     "pydantic-settings>=2.3.0",
     "uvicorn>=0.30.0",
     "starlette>=0.37.0",
+    "pyjwt[crypto]>=2.8.0",
 ]
 
 [project.optional-dependencies]

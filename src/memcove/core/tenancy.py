@@ -58,6 +58,37 @@ def _map_identity(headers: dict[str, str], settings) -> str | None:
     return None
 
 
+def resolve_tenant_from_claims(claims: dict) -> str:
+    """Resolve the tenant from a *verified* OAuth token's claims (native OAuth mode).
+
+    Same fail-closed provisioning semantics as the header path, but the identity comes
+    from a validated JWT rather than a proxy header:
+
+    1. If ``tenant_map`` is configured, map the token's ``sub`` (else a matching group/
+       role) through it, and **reject** an unmapped identity — never fall through.
+    2. Otherwise use the configured ``oauth_tenant_claim`` value directly (safe because
+       it's from a signed token, not client-settable).
+    """
+    settings = get_settings()
+    subject = claims.get("sub")
+    groups = claims.get("groups") or claims.get("roles") or []
+    if isinstance(groups, str):
+        groups = [groups]
+
+    if settings.tenant_map:
+        if subject and subject in settings.tenant_map:
+            return normalize_tenant(settings.tenant_map[subject])
+        for group in groups:
+            if group in settings.tenant_map:
+                return normalize_tenant(settings.tenant_map[group])
+        raise TenancyError("caller identity is not provisioned to any tenant")
+
+    value = claims.get(settings.oauth_tenant_claim)
+    if not value:
+        raise TenancyError(f"token has no {settings.oauth_tenant_claim!r} claim for tenant")
+    return normalize_tenant(str(value))
+
+
 def resolve_tenant(headers: dict[str, str] | None) -> str:
     """Resolve the tenant namespace from request headers.
 

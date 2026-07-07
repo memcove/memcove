@@ -113,6 +113,24 @@ class Settings(BaseSettings):
     tenant_group_header: str = ""  # e.g. "x-auth-groups" (comma-separated)
     tenant_map: dict[str, str] = {}  # subject/group -> internal tenant id
 
+    # Native OAuth 2.1 (MCP resource server). When enabled, Memcove validates bearer
+    # JWTs itself (against the IdP's JWKS) instead of trusting proxy headers, so a client
+    # like Claude can connect directly. Provider-agnostic; Keycloak is the documented
+    # default. When disabled (default), the trusted-header / proxy model is used.
+    oauth_enabled: bool = False
+    oauth_issuer: str = ""  # IdP issuer URL, e.g. https://keycloak.example.com/realms/memcove
+    oauth_jwks_uri: str = ""  # optional; derived from the issuer's OIDC discovery when empty
+    oauth_audience: str = ""  # expected `aud` (this resource server's identifier); "" = skip aud check
+    oauth_required_scopes: list[str] = []  # scopes every token must carry
+    oauth_algorithms: list[str] = ["RS256"]  # accepted JWT signing algorithms
+    # Claim used as the internal tenant id when a caller's identity isn't in tenant_map
+    # (e.g. "sub", "preferred_username", or a custom "tenant" claim). With tenant_map set,
+    # the map wins and unmapped identities are rejected (fail-closed), same as header mode.
+    oauth_tenant_claim: str = "sub"
+    # This server's public base URL, published as the OAuth protected-resource identifier
+    # so clients discover the authorization server. Falls back to http://host:port.
+    public_url: str = ""
+
     # Shared read-only reference plane (the gateway): schemas every tenant may SELECT
     # from but none may write. These are NOT rewritten to the caller's namespace by the
     # SQL guard; they resolve to themselves. Per-domain schemas contain blast radius.

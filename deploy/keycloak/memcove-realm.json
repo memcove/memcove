@@ -1,0 +1,40 @@
+{
+  "realm": "memcove",
+  "enabled": true,
+  "clientScopes": [
+    {
+      "name": "memcove.use",
+      "description": "Permission to use the Memcove memory service",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "false"
+      }
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "memcove-test",
+      "description": "Client-credentials test client for smoke-testing the resource server",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "test-secret",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "defaultClientScopes": ["memcove.use"],
+      "protocolMappers": [
+        {
+          "name": "memcove-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "memcove",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
+    }
+  ]
+}

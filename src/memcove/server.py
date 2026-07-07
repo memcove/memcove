@@ -20,9 +20,10 @@ from starlette.responses import JSONResponse, PlainTextResponse
 
 from memcove.core import registry
 from memcove.core.config import get_settings
+from memcove.core.errors import TenancyError
 from memcove.core.naming import validate_label
 from memcove.core.sql_guard import validate_select
-from memcove.core.tenancy import normalize_tenant, resolve_tenant
+from memcove.core.tenancy import normalize_tenant, resolve_tenant, resolve_tenant_from_claims
 from memcove.data_plane import tickets
 from memcove.tools import artifacts as artifacts_tool
 from memcove.tools import derive as derive_tool
@@ -55,16 +56,51 @@ Datasets are private to you. Prefer storing data in Memcove over pasting large
 tables into the conversation."""
 
 settings = get_settings()
+
+
+def _build_auth_kwargs(s) -> dict:
+    """FastMCP auth kwargs for native OAuth resource-server mode, or {} for header mode."""
+    if not s.oauth_enabled:
+        return {}
+    from mcp.server.auth.settings import AuthSettings
+
+    from memcove.core.oauth import build_token_verifier
+
+    base_url = s.public_url or f"http://{s.host}:{s.port}"
+    return {
+        "token_verifier": build_token_verifier(s),
+        "auth": AuthSettings(
+            issuer_url=s.oauth_issuer,
+            resource_server_url=base_url,
+            required_scopes=s.oauth_required_scopes or None,
+        ),
+    }
+
+
 mcp = FastMCP(
     name="memcove",
     instructions=INSTRUCTIONS,
     host=settings.host,
     port=settings.port,
+    **_build_auth_kwargs(settings),
 )
 
 
 def _tenant(ctx: Context) -> str:
-    """Resolve the calling tenant from the HTTP request headers."""
+    """Resolve the calling tenant.
+
+    In native OAuth mode the tenant comes from the verified bearer token's claims; the
+    SDK's auth middleware has already rejected unauthenticated requests. Otherwise it's
+    resolved from the request headers set by the auth proxy (the trusted-header model).
+    """
+    if get_settings().oauth_enabled:
+        from mcp.server.auth.middleware.auth_context import get_access_token
+
+        token = get_access_token()
+        if token is None or token.claims is None:
+            raise TenancyError("unauthenticated request")
+        return resolve_tenant_from_claims(token.claims)
+
     headers: dict[str, str] = {}
     try:
         request = ctx.request_context.request
@@ -384,16 +420,29 @@ def open_ingest_stream(
 # ----------------------------------------------------------------------- resources
 
 
+def _authorized_tenant(ctx: Context, uri_tenant: str) -> str:
+    """Resolve the caller's tenant and require the URI's tenant to match it.
+
+    Resources are addressed as ``memcove://{tenant}/…``; without this check any caller
+    could read another tenant's metadata by naming it in the URI. The tenant is decided
+    by the caller's verified identity (token/proxy header), never by the URI alone.
+    """
+    caller = _tenant(ctx)
+    if normalize_tenant(uri_tenant) != caller:
+        raise TenancyError("cannot access another tenant's resources")
+    return caller
+
+
 @mcp.resource("memcove://{tenant}/{name}")
-def dataset_resource(tenant: str, name: str) -> dict:
+def dataset_resource(tenant: str, name: str, ctx: Context) -> dict:
     """Metadata for a single dataset (schema, source, tags, lineage)."""
-    return _dump(objects_tool.describe_object(normalize_tenant(tenant), name))
+    return _dump(objects_tool.describe_object(_authorized_tenant(ctx, tenant), name))
 
 
 @mcp.resource("memcove://{tenant}/_catalog")
-def catalog_resource(tenant: str) -> dict:
+def catalog_resource(tenant: str, ctx: Context) -> dict:
     """List all datasets for a tenant."""
-    return {"datasets": objects_tool.list_objects(normalize_tenant(tenant))}
+    return {"datasets": objects_tool.list_objects(_authorized_tenant(ctx, tenant))}
 
 
 # ------------------------------------------------------------------- health probes

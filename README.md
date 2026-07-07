@@ -1,33 +1,61 @@
 # Memcove
 
-A **lakehouse-backed memory service for LLM agents**, exposed over **MCP**.
+**Durable, queryable memory for LLM agents — so they can work with real datasets
+instead of stuffing everything into their context window.**
 
-Agents dump data into labeled **memory objects** (inline dataframe, an `s3://`
-parquet reference, or an out-of-band upload), ask the service to derive new
-objects with SQL (joins / aggregations / filters), and either read results back
-or get an **exported artifact** as a presigned URL. Objects are Iceberg tables
-in a Trino-backed catalog.
+## The problem
 
-## Architecture — two planes
+When an AI agent works with data — a spreadsheet you hand it, a query result, a few
+million rows of logs — it has nowhere good to keep it. Its only working memory is the
+context window, so the data either:
 
-- **Control plane = this MCP server.** Metadata, SQL/derivation, capped previews,
-  artifact URIs, presigned-upload handles. This is all the LLM touches.
-- **Data plane = S3 + Trino/Iceberg.** Bulk bytes never travel through MCP tool
-  responses; the model gets handles, previews, and presigned URLs instead.
+- gets pasted into the prompt (token-expensive, lossy, and capped at a few megabytes), or
+- disappears the moment the session ends.
 
-Write vs read split:
+So a request like *"remember last quarter's orders, join them with this month's returns,
+and show me the top customers"* is either impossible (too big for the prompt) or has to be
+redone from scratch every session.
+
+## The solution
+
+Memcove is a memory service an agent talks to over [MCP](https://modelcontextprotocol.io).
+The agent works with data **by name**, and the data itself stays out of its context:
+
+1. **Remember** a dataset under a name — inline rows, an `s3://` parquet file, or a direct
+   upload.
+2. **Derive** new datasets from it with plain SQL — joins, aggregations, filters — which
+   Memcove runs and records the lineage of.
+3. **Read back** only what's needed: a small capped preview, or a download link for the
+   full result.
+
+The data — gigabytes if it needs to be — lives in a real data lakehouse and **never passes
+through the model's context**. The agent only ever sees dataset names, small previews, and
+links. Memory is **durable across sessions**, and every agent (tenant) is **isolated** from
+the others.
+
+## How it works
+
+Two planes keep the bytes away from the model:
+
+- **Control plane = this MCP server.** Metadata, SQL/derivation, capped previews, artifact
+  URIs, presigned-upload handles. This is all the LLM touches.
+- **Data plane = S3 + Trino/Iceberg.** Bulk bytes never travel through MCP tool responses;
+  the model gets handles, previews, and presigned URLs instead.
+
+Datasets are Iceberg tables in a Trino-backed catalog. The write and read paths are split:
+
 - **PyIceberg + PyArrow** = the ingest/write path (`core/catalog.py`).
 - **Trino** = the read/derive/export path (`core/trino_client.py`).
 
 Isolation is **private per tenant** (`<tenant>.<label>` → Iceberg table
-`iceberg.<tenant_ns>.<label>`), enforced by the **SQL guard**
-(`core/sql_guard.py`): only read-only SELECTs, every table reference qualified to
-the caller's namespace, cross-namespace/catalog references rejected.
+`iceberg.<tenant_ns>.<label>`), enforced by the **SQL guard** (`core/sql_guard.py`): only
+read-only SELECTs, every table reference qualified to the caller's namespace,
+cross-namespace/catalog references rejected.
 
-> **Auth**: two models, both resolving to the tenant namespace through the single
-> `core/tenancy.py` seam — a **trusted-header / proxy** mode (default) and **native
-> OAuth 2.1**, where Memcove validates bearer JWTs itself so clients like Claude connect
-> directly. See the [auth docs](https://memcove.github.io/memcove/configuration/auth/).
+**Auth**: two models, both resolving to the tenant namespace through the single
+`core/tenancy.py` seam — a **trusted-header / proxy** mode (default) and **native OAuth
+2.1**, where Memcove validates bearer JWTs itself so clients like Claude connect directly.
+See the [auth docs](https://memcove.github.io/memcove/configuration/auth/).
 
 ## MCP tools
 

@@ -1,13 +1,20 @@
 # Authentication & tenancy
 
-Memcove does **not** validate OIDC tokens. It sits behind an authenticating proxy that
-sets trusted headers, and turns those headers into an internal tenant namespace. This page
-covers how that resolution works and how to wire it. Read
+Memcove supports **two authentication models**, and in both cases resolves the request to a
+single internal tenant namespace that everything downstream keys on. Read
 [Security & trust boundary](../concepts/security.md) first for the assumptions.
+
+1. **Trusted-header / proxy** (default) — Memcove sits behind an authenticating proxy that
+   validates OIDC and sets trusted headers; Memcove maps those to a tenant. Simplest, and
+   right when you already terminate auth at the edge.
+2. **Native OAuth** — Memcove itself validates bearer JWTs against your IdP's JWKS, so an
+   MCP client (Claude, MCP Inspector) connects **directly**, no proxy required. See
+   [Native OAuth](#native-oauth-resource-server) below.
 
 ## How the tenant is resolved
 
-`tenancy.resolve_tenant(headers)` decides the tenant once per request, in two modes:
+In proxy mode, `tenancy.resolve_tenant(headers)` decides the tenant once per request, in two
+modes:
 
 ### Direct header (default)
 
@@ -36,6 +43,39 @@ directly as a namespace, and stops a caller from self-selecting a tenant.
     Use the provisioning map (or map identity → tenant at the proxy) rather than passing a
     raw `sub` through. Keep the mapping small and explicit.
 
+## Native OAuth (resource server)
+
+Set `MEMCOVE_OAUTH_ENABLED=true` and Memcove becomes an OAuth 2.1 **resource server**: it
+serves `/.well-known/oauth-protected-resource`, validates the bearer JWT on every request
+(signature via the IdP's JWKS, plus issuer, audience, expiry, and required scopes), and
+returns a `401` with a `WWW-Authenticate` challenge when the token is missing or invalid.
+The authorization dance (login, consent, client registration) stays with your IdP —
+Memcove only verifies the token it issues.
+
+```bash
+MEMCOVE_OAUTH_ENABLED=true
+MEMCOVE_OAUTH_ISSUER=https://keycloak.example.com/realms/memcove
+MEMCOVE_OAUTH_AUDIENCE=memcove          # expected `aud`; empty to skip the check
+MEMCOVE_OAUTH_REQUIRED_SCOPES=["memcove.use"]
+MEMCOVE_PUBLIC_URL=https://memcove.example.com   # advertised resource identifier
+```
+
+The JWKS URI is discovered from the issuer's OIDC metadata; set `MEMCOVE_OAUTH_JWKS_URI` to
+pin it explicitly. It's provider-agnostic — any OIDC IdP works. See
+[`deploy/keycloak/`](https://github.com/memcove/memcove/tree/main/deploy/keycloak) for a
+runnable Keycloak worked example (the default) with a realm, audience mapper, and a smoke
+test.
+
+**Tenant from claims.** The verified token maps to a tenant the same fail-closed way as
+proxy mode: if `MEMCOVE_TENANT_MAP` is set, the token's `sub` (or a matching `groups`/
+`roles` entry) is mapped through it and an unmapped identity is **rejected**. With no map,
+the tenant comes from a single configurable claim (`MEMCOVE_OAUTH_TENANT_CLAIM`, default
+`sub`) — safe because it's from a signed token, not a client-settable header.
+
+The Arrow Flight data plane is unchanged: it stays secured by the HMAC-signed, short-TTL
+tickets the (now OAuth-authenticated) control plane mints — clients get tickets, never
+tokens.
+
 ## Trino impersonation (defense-in-depth)
 
 The tenant resolution above plus the [SQL guard](../concepts/isolation.md) are the primary
@@ -57,7 +97,9 @@ local/dev where Trino has no authz.
 
 ## Header hygiene
 
-Whichever mode you use, the proxy must **overwrite** the identity/tenant header from the
-verified identity and **strip** any client-supplied copy, so a caller cannot spoof it. Pair
-this with network isolation so only the proxy can reach Memcove — see
-[Kubernetes](../deployment/kubernetes.md).
+In **proxy mode**, the proxy must **overwrite** the identity/tenant header from the verified
+identity and **strip** any client-supplied copy, so a caller cannot spoof it. Pair this with
+network isolation so only the proxy can reach Memcove — see
+[Kubernetes](../deployment/kubernetes.md). In **native OAuth mode** the tenant comes from the
+signed token rather than a header, so this concern doesn't apply — but still restrict who can
+reach Memcove at the network layer.

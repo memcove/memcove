@@ -1,0 +1,30 @@
+# Keycloak — a local OIDC provider for testing Memcove's native OAuth resource server.
+#
+# This is the *default worked example*; any OIDC-compliant IdP (Auth0, Okta, Google, …)
+# works the same way — only the issuer URL and how you mint tokens change.
+#
+#   docker compose -f deploy/keycloak/docker-compose.keycloak.yml up -d
+#
+# Then point Memcove at it (see deploy/keycloak/README.md):
+#   MEMCOVE_OAUTH_ENABLED=true
+#   MEMCOVE_OAUTH_ISSUER=http://localhost:8081/realms/memcove
+#   MEMCOVE_OAUTH_AUDIENCE=memcove
+#   MEMCOVE_OAUTH_REQUIRED_SCOPES=["memcove.use"]
+#
+# Runs on host port 8081 to avoid clashing with Trino's 8080 in the main stack.
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+    ports:
+      - "8081:8080"
+    volumes:
+      - ./memcove-realm.json:/opt/keycloak/data/import/memcove-realm.json:ro
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/8080 && echo ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 30

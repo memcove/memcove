@@ -4,6 +4,27 @@ All notable changes to Memcove are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 semantic versioning once it reaches 1.0.
 
+## [0.6.0] - 2026-07-07
+
+### Added
+- **Native OAuth 2.1 resource server** — set `MEMCOVE_OAUTH_ENABLED=true` and Memcove
+  validates bearer JWTs itself against the IdP's JWKS (signature, issuer, audience,
+  expiry, required scopes) and serves `/.well-known/oauth-protected-resource`, so an MCP
+  client like Claude can connect directly instead of through an auth proxy. Returns `401`
+  + `WWW-Authenticate` when unauthenticated. Provider-agnostic; a runnable Keycloak worked
+  example ships in `deploy/keycloak/`. New `core/oauth.py` (`JWKSTokenVerifier`) and
+  `MEMCOVE_OAUTH_*` settings.
+- **Tenant from verified claims** — in OAuth mode the tenant is resolved from the signed
+  token: mapped through `MEMCOVE_TENANT_MAP` (fail-closed for unmapped identities) or, with
+  no map, from a configurable claim (`MEMCOVE_OAUTH_TENANT_CLAIM`, default `sub`).
+  `tenancy.resolve_tenant_from_claims()`.
+
+### Fixed
+- **Cross-tenant resource read** — the `memcove://{tenant}/…` MCP resources took the tenant
+  from the URI and only normalized it, so a caller could read another tenant's dataset
+  metadata by naming it. They now require the URI's tenant to match the caller's
+  authenticated tenant, matching the tool path.
+
 ## [0.5.0] - 2026-07-07
 
 ### Added

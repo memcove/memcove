@@ -62,6 +62,7 @@ memcove-server = "memcove.server:main"
 memcove-flight = "memcove.data_plane.flight_server:main"
 memcove-reconcile = "memcove.reconciler:main"
 memcove-bench = "memcove.benchmarks.finance:main"  # needs the `bench` extra (yfinance, pandas)
+memcove-dcf = "memcove.benchmarks.dcf:main"        # DCF valuation pipeline (bench extra)
 
 [build-system]
 requires = ["hatchling"]

@@ -1,79 +1,90 @@
-# Memcove finance benchmark
+# Memcove example workloads
 
-A **deterministic, model-free** workload that stresses Memcove the way an analytics agent
-would: ingest real market data, then build a **multi-hop DAG** of derived datasets —
-joins, window functions, aggregates — and time every step. There is no LLM; a fixed plan
-stands in for the model, so results are reproducible and isolate the compute/storage
-engine (Trino + Iceberg + the registry) from the MCP transport.
-
-## Run
-
-The harness is the `memcove-bench` console command (from `memcove.benchmarks.finance`):
+Two **deterministic, model-free** workloads that drive the real Memcove tools with real
+market data — no LLM, a fixed plan stands in for the model, so runs are reproducible and
+isolate the compute/storage engine (Trino + Iceberg + the registry) from the MCP
+transport. Both fall back to deterministic synthetic data (`--synthetic`) so they run
+offline, and both live in `memcove.benchmarks`.
 
 ```bash
 docker compose up -d --wait          # Memcove stack (Trino, Iceberg, MinIO, Postgres)
 uv sync --extra bench                # yfinance + pandas
-uv run memcove-bench --years 8 --replicate 4
-
-# bigger, with the heavy O(n²) correlation step:
-uv run memcove-bench --years 10 --replicate 10 --heavy-corr
-
-# offline (deterministic geometric-Brownian-motion data, no network):
-uv run memcove-bench --synthetic
 ```
 
-Outside the repo (after `pip install memcove[bench]`) it's just `memcove-bench …`.
-Price cache + result JSON are written under `./benchmark-output/` (override with
-`--out-dir`).
+Outputs (price cache, result JSON) go to `./benchmark-output/` — override with `--out-dir`.
+Outside the repo (after `pip install memcove[bench]`) the commands are on your PATH.
+
+---
+
+## 1. `memcove-bench` — throughput benchmark
+
+Ingests real daily OHLCV and builds a **multi-hop DAG** of derived datasets, timing every
+step.
+
+```bash
+uv run memcove-bench --years 8 --replicate 4
+uv run memcove-bench --years 10 --replicate 10 --heavy-corr   # bigger + heaviest hop
+uv run memcove-bench --synthetic                              # offline
+```
 
 | Flag | Default | Effect |
 | --- | --- | --- |
 | `--years` | 8 | history depth (rows scale linearly) |
-| `--replicate` | 4 | clone each ticker N× with a perturbed price path — real seed data, synthetic scale to grow the universe and join cardinality |
-| `--heavy-corr` | off | add the within-sector return-correlation self-join (the heaviest hop) |
+| `--replicate` | 4 | clone each ticker N× with a perturbed price path — real seed, synthetic scale |
+| `--heavy-corr` | off | add the within-sector return-correlation self-join (heaviest hop) |
 | `--synthetic` | off | skip yfinance; use GBM data |
 | `--tickers` | — | comma list to override the ~44-name universe |
-| `--tenant` | `bench` | tenant namespace to build into (reset at start) |
 
-Real prices are cached under `benchmark-output/cache/`; per-run metrics land in
-`benchmark-output/results/*.json` (the whole dir is gitignored; change with `--out-dir`).
+**DAG:** `daily_returns` (LAG) → `rolling_vol` (STDDEV window) / `rolling_ma` (AVG windows)
+→ `returns_by_sector` (join+GROUP BY) → `sector_vol_monthly`, `monthly_perf`
+(MIN_BY/MAX_BY), `top_movers` (RANK), `pairwise_corr` (self-join, `--heavy-corr`), and a
+5-way `signal` join with the deepest lineage.
 
-## The workload
+**Sample** (real data, 8y, `--replicate 4 --heavy-corr`): 220 tickers, 432,580 price rows,
+**1.77M rows materialized in ~15s**; ingest ~395k rows/s.
 
-**Ingest** — `prices` (long OHLCV, via the presigned-upload path) + `securities`
-(ticker → sector, inline).
+---
 
-**Derive (multi-hop DAG)** — each step is a `derive_dataset` (CTAS) over prior datasets:
+## 2. `memcove-dcf` — DCF valuation pipeline
 
-| # | Dataset | Shape exercised |
+Pulls real financial-statement data (cash-flow statement + market/balance-sheet snapshot
+from yfinance), loads it into Memcove, and runs a **discounted-cash-flow** valuation as a
+multi-hop SQL DAG entirely inside Trino — then ranks each company by fair-value-vs-price.
+
+```bash
+uv run memcove-dcf
+uv run memcove-dcf --tickers AAPL,MSFT,GOOGL --proj-years 7 --term-growth 0.03
+uv run memcove-dcf --synthetic
+```
+
+| Flag | Default | Meaning |
 | --- | --- | --- |
-| H1 | `daily_returns` | `LAG` window per ticker |
-| H2 | `rolling_vol` | 21-day `STDDEV` rolling window |
-| H3 | `rolling_ma` | 20/50/200-day `AVG` windows |
-| H4 | `returns_by_sector` | join `securities` + `GROUP BY` |
-| H5 | `sector_vol_monthly` | join + `date_trunc` + aggregate |
-| H6 | `monthly_perf` | `MIN_BY`/`MAX_BY` aggregates |
-| H7 | `top_movers` | `RANK` window |
-| H8 | `pairwise_corr` | self-join of returns within a sector + `corr()` *(--heavy-corr)* |
-| H9 | `signal` | **5-way join** (trend ⋈ risk ⋈ momentum) — deepest lineage |
+| `--proj-years` | 5 | explicit forecast horizon |
+| `--rf` | 0.043 | risk-free rate |
+| `--erp` | 0.05 | equity risk premium (cost of equity = `rf + beta·erp`) |
+| `--term-growth` | 0.025 | terminal growth rate (Gordon growth) |
+| `--tickers` | — | comma list to override the ~20 US large-cap universe |
+| `--synthetic` | off | skip yfinance; use synthetic fundamentals |
 
-`signal` depends on `rolling_ma`, `rolling_vol`, `prices`, `securities`, and
-`returns_by_sector` — which themselves trace back to `prices`, so it's a genuine
-multi-hop derivation with real lineage (inspect it with `inspect_dataset`).
-
-**Query + export** — analytical previews (leaderboard, sector scores, top movers) and a
-parquet export of `signal`.
-
-## Sample result
-
-Real yfinance data, 8 years, `--replicate 4 --heavy-corr` (local Docker stack):
+**DAG:** `fundamentals` → `fcf_history` (OCF+CapEx) → `fcf_growth` (historical CAGR) →
+`dcf_base` (join market + `dcf_params`; clamped growth, CAPM discount rate, net debt) →
+`proj_fcf` (× `proj_years`, POWER discounting) → `valuation` (Σ PV + terminal value) →
+`fair_value` (enterprise → equity → per-share, upside vs price).
 
 ```
-tickers: 220   price rows: 432,580 (28 MB)   rows materialized: 1.77M   wall: ~15s
-ingest prices     432,580 rows   ~395k rows/s
-signal (5-way join) 432,150 rows   ~1.7s
-pairwise_corr        106 corrs    ~1.4s
+FCF       = operating cash flow + capex          (capex is negative)
+growth    = historical FCF CAGR, clamped to [-2%, 12%]
+disc_rate = CAPM cost of equity  rf + beta·erp   (used as the WACC proxy)
+EV        = Σ FCFₙ/(1+r)ⁿ  +  [FCF_N·(1+g_term)/(r−g_term)]/(1+r)ᴺ
+equity    = EV − net debt      fair/share = equity / shares      upside = fair/price − 1
 ```
 
-Numbers are engine-and-hardware dependent — use them for relative comparison across
-changes, not as absolute throughput claims.
+**Caveats — this is an illustrative DCF, not investment advice.** It uses OCF−CapEx as an
+FCF proxy (levered), a CAPM cost of equity as the discount rate, and a single
+historical-CAGR growth assumption; it drops firms with non-positive FCF (e.g. banks, where
+OCF−CapEx isn't meaningful). Real valuation needs normalized FCFF, a proper WACC, and
+per-company forecasts. The point is the **pipeline** — real fundamentals through a
+transparent multi-hop DAG in Memcove — not the price targets.
+
+Both workloads are **tooling only** (no `src/memcove` behavior change) beyond the `bench`
+optional extra and the two console entry points.

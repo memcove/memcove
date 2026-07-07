@@ -47,44 +47,60 @@ uv run memcove-bench --synthetic                              # offline
 
 ## 2. `memcove-dcf` — DCF valuation pipeline
 
-Pulls real financial-statement data (cash-flow statement + market/balance-sheet snapshot
-from yfinance), loads it into Memcove, and runs a **discounted-cash-flow** valuation as a
-multi-hop SQL DAG entirely inside Trino — then ranks each company by fair-value-vs-price.
+Pulls real financial-statement data (cash-flow + income statement + market/balance-sheet
+snapshot from yfinance), loads it into Memcove, and runs a **discounted-cash-flow**
+valuation as a multi-hop SQL DAG entirely inside Trino. Pass tickers as positional
+arguments — one ticker prints a full breakdown, several print a leaderboard.
 
 ```bash
-uv run memcove-dcf
-uv run memcove-dcf --tickers AAPL,MSFT,GOOGL --proj-years 7 --term-growth 0.03
-uv run memcove-dcf --synthetic
+uv run memcove-dcf                              # value the built-in ~20 US large caps
+uv run memcove-dcf AAPL                          # one ticker → detailed breakdown
+uv run memcove-dcf AAPL MSFT GOOGL               # several → leaderboard
+uv run memcove-dcf NVDA --method simple --proj-years 7
+uv run memcove-dcf --synthetic                   # offline, deterministic
 ```
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
+| `<tickers>` | universe | positional: one or more tickers to value |
+| `--method` | `fcff` | `fcff` (unlevered FCF at WACC) or `simple` (FCFE proxy at cost of equity) |
 | `--proj-years` | 5 | explicit forecast horizon |
 | `--rf` | 0.043 | risk-free rate |
 | `--erp` | 0.05 | equity risk premium (cost of equity = `rf + beta·erp`) |
 | `--term-growth` | 0.025 | terminal growth rate (Gordon growth) |
-| `--tickers` | — | comma list to override the ~20 US large-cap universe |
 | `--synthetic` | off | skip yfinance; use synthetic fundamentals |
 
-**DAG:** `fundamentals` → `fcf_history` (OCF+CapEx) → `fcf_growth` (historical CAGR) →
-`dcf_base` (join market + `dcf_params`; clamped growth, CAPM discount rate, net debt) →
+**DAG:** `fundamentals` → `fcf_history` → `fcf_growth` (historical CAGR) → `discount_rate`
+(WACC or cost of equity) → `dcf_base` (3-way join: growth, discount rate, net debt) →
 `proj_fcf` (× `proj_years`, POWER discounting) → `valuation` (Σ PV + terminal value) →
 `fair_value` (enterprise → equity → per-share, upside vs price).
 
+**Two methods:**
+
 ```
-FCF       = operating cash flow + capex          (capex is negative)
-growth    = historical FCF CAGR, clamped to [-2%, 12%]
-disc_rate = CAPM cost of equity  rf + beta·erp   (used as the WACC proxy)
-EV        = Σ FCFₙ/(1+r)ⁿ  +  [FCF_N·(1+g_term)/(r−g_term)]/(1+r)ᴺ
-equity    = EV − net debt      fair/share = equity / shares      upside = fair/price − 1
+fcff (default) — proper enterprise DCF
+  FCFF      = OCF + interest·(1−tax) + capex          (unlevered)
+  disc_rate = WACC = (E/V)·Re + (D/V)·Rd·(1−tax)      (Re = rf + beta·erp via CAPM)
+
+simple — quick levered proxy
+  FCF       = OCF + capex                             (capex is negative)
+  disc_rate = CAPM cost of equity (Re)
+
+both:  growth = historical FCF CAGR, clamped to [−2%, 12%]
+       EV     = Σ FCFₙ/(1+r)ⁿ + [FCF_N·(1+g_term)/(r−g_term)]/(1+r)ᴺ
+       equity = EV − net debt   fair/share = equity/shares   upside = fair/price − 1
 ```
 
-**Caveats — this is an illustrative DCF, not investment advice.** It uses OCF−CapEx as an
-FCF proxy (levered), a CAPM cost of equity as the discount rate, and a single
-historical-CAGR growth assumption; it drops firms with non-positive FCF (e.g. banks, where
-OCF−CapEx isn't meaningful). Real valuation needs normalized FCFF, a proper WACC, and
-per-company forecasts. The point is the **pipeline** — real fundamentals through a
-transparent multi-hop DAG in Memcove — not the price targets.
+The `fcff` method uses the income statement (interest expense, effective tax rate) plus
+market weights to compute a real per-company WACC, so high-beta names get a higher discount
+rate (e.g. NVDA ~15% vs a low-beta defensive ~5%).
+
+**Caveats — illustrative, not investment advice.** Even `fcff` leans on OCF+after-tax-interest
+as the FCFF base (rather than EBIT·(1−t)+D&A−CapEx−ΔNWC), a single historical-CAGR growth
+assumption, and book debt as a market-value proxy; it drops firms with non-positive FCF
+(e.g. banks). Low-beta names get low WACCs and correspondingly high terminal multiples — a
+real DCF sensitivity to be read with care. The point is the **pipeline** — real fundamentals
+through a transparent multi-hop DAG in Memcove — not the price targets.
 
 Both workloads are **tooling only** (no `src/memcove` behavior change) beyond the `bench`
 optional extra and the two console entry points.

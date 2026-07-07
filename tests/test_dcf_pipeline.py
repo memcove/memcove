@@ -20,8 +20,9 @@ def test_synthetic_data_is_well_formed():
     assert len(fund) == len(market) * 4  # 4 fiscal years each
 
     f = fund[0]
-    assert set(f) == {"ticker", "fiscal_year", "ocf", "capex"}
+    assert set(f) == {"ticker", "fiscal_year", "ocf", "capex", "interest", "tax_rate"}
     assert f["ocf"] > 0 and f["capex"] < 0  # capex reported negative, so FCF = ocf + capex
+    assert f["interest"] >= 0 and 0 < f["tax_rate"] < 1  # WACC inputs for the fcff method
 
     m = market[0]
     assert set(m) == {"ticker", "price", "shares", "beta", "total_debt", "cash"}

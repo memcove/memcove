@@ -36,6 +36,11 @@ dependencies = [
 mysql = [
     "pymysql>=1.1.0",
 ]
+# Benchmark harness (benchmarks/finance_benchmark.py): real market data via yfinance.
+bench = [
+    "yfinance>=0.2.40",
+    "pandas>=2.0.0",
+]
 dev = [
     "pytest>=8.2.0",
     "pytest-asyncio>=0.23.0",
@@ -56,6 +61,8 @@ Changelog = "https://github.com/memcove/memcove/blob/main/CHANGELOG.md"
 memcove-server = "memcove.server:main"
 memcove-flight = "memcove.data_plane.flight_server:main"
 memcove-reconcile = "memcove.reconciler:main"
+memcove-bench = "memcove.benchmarks.finance:main"  # needs the `bench` extra (yfinance, pandas)
+memcove-dcf = "memcove.benchmarks.dcf:main"        # DCF valuation pipeline (bench extra)
 
 [build-system]
 requires = ["hatchling"]

@@ -37,6 +37,39 @@ see [Local development (no proxy)](../configuration/local-dev.md).
     production puts an authenticating proxy in front and restricts the network. See
     [Security & trust boundary](../concepts/security.md).
 
+## Connect Claude (native OAuth)
+
+To let Claude — or any OAuth-capable MCP client — connect **directly**, without a proxy,
+enable Memcove's native OAuth resource server. Memcove then validates bearer tokens
+itself and the tenant comes from the verified token instead of a header.
+
+1. **Enable OAuth** on the server, pointed at your IdP (Keycloak, Auth0, Okta, Google, …):
+
+    ```bash
+    MEMCOVE_OAUTH_ENABLED=true
+    MEMCOVE_OAUTH_ISSUER=https://keycloak.example.com/realms/memcove
+    MEMCOVE_OAUTH_AUDIENCE=memcove
+    MEMCOVE_OAUTH_REQUIRED_SCOPES=["memcove.use"]
+    MEMCOVE_PUBLIC_URL=https://memcove.example.com
+    ```
+
+    Full setup, claim→tenant mapping, and a runnable Keycloak example are in
+    [Authentication & tenancy](../configuration/auth.md#native-oauth-resource-server).
+
+2. **Add the server in Claude** — in Claude's connectors/MCP settings, add a custom
+   connector with Memcove's URL (`https://memcove.example.com/mcp`). Claude reads the
+   `/.well-known/oauth-protected-resource` metadata, discovers your authorization server,
+   and runs the login flow against your IdP. On success it calls the tools as the
+   authenticated user.
+
+Unauthenticated requests get a `401` with a `WWW-Authenticate` challenge — that's the
+resource server telling the client where to authenticate, not an error.
+
+!!! note "Prefer the proxy instead?"
+    If you terminate OIDC at the edge, leave OAuth disabled and keep the header model —
+    the proxy authenticates and sets `x-memcove-tenant`. Both paths funnel through the
+    same tenant seam. See the [proxy recipe](../configuration/auth.md).
+
 ## Minimal client (Python)
 
 Using the official MCP SDK's Streamable HTTP client, passing the tenant header:
@@ -82,6 +115,19 @@ uv run python scripts/pipeline_demo.py   # guided: deterministic lifecycle, alwa
 Both accept env overrides — `MEMCOVE_MCP_URL` (default `http://localhost:8090/mcp`),
 `MEMCOVE_TENANT`, and the `LMSTUDIO_*` connection settings. They are the fastest way to
 see an agent use every tool end to end.
+
+!!! tip "Use a cloud model instead of LM Studio"
+    The `LMSTUDIO_*` variables are just an OpenAI-compatible endpoint — point them at any
+    provider. For OpenAI:
+
+    ```bash
+    export LMSTUDIO_BASE_URL=https://api.openai.com/v1
+    export LMSTUDIO_API_KEY=$OPENAI_API_KEY
+    export LMSTUDIO_MODEL=gpt-4o
+    uv run python scripts/agent_demo.py
+    ```
+
+    No local model server required.
 
 ## Next
 

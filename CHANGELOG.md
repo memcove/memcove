@@ -4,6 +4,21 @@ All notable changes to Memcove are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 semantic versioning once it reaches 1.0.
 
+## [0.7.0] - 2026-07-07
+
+### Added
+- **Onboarding docs** — a "Run with Docker" getting-started page (published image,
+  entry points, env-file), an "Install with Helm" deployment page (OCI chart, BYO-infra
+  values, IRSA, native-OAuth values, probes), a "BYO Trino & catalog" page stating exactly
+  what Memcove assumes of a self-hosted Trino (≥ 431) and Iceberg REST catalog, a
+  "Connect Claude (native OAuth)" section, and a cloud-model option for the demo scripts.
+- **Chart: first-class OAuth config** — `config.oauth.*` in the Helm chart renders the
+  `MEMCOVE_OAUTH_*` env, so native OAuth is a values toggle rather than raw `extraEnv`.
+
+### Changed
+- The Kubernetes and production-checklist docs now lead with the Helm chart and present
+  native OAuth alongside the proxy model as first-class auth options.
+
 ## [0.6.0] - 2026-07-07
 
 ### Added

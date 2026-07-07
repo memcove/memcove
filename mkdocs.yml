@@ -78,6 +78,7 @@ nav:
   - Home: index.md
   - Getting Started:
       - Quickstart: getting-started/quickstart.md
+      - Run with Docker: getting-started/docker.md
       - Connect an MCP client: getting-started/connecting.md
       - Walkthrough: getting-started/walkthrough.md
   - Concepts:
@@ -98,8 +99,10 @@ nav:
       - Authentication & tenancy: configuration/auth.md
       - Local development (no proxy): configuration/local-dev.md
   - Deployment:
+      - Install with Helm: deployment/helm.md
+      - BYO Trino & catalog: deployment/byo-trino.md
+      - Kubernetes networking: deployment/kubernetes.md
       - Production checklist: deployment/checklist.md
-      - Kubernetes: deployment/kubernetes.md
   - Reference:
       - CLI & entry points: reference/cli.md
       - Changelog: changelog.md

@@ -1,25 +1,44 @@
 # Production checklist
 
-Memcove ships no opinionated cluster manifest — it's a generic, self-hostable service. You
-bring your own object store, Trino, catalog, Postgres, and identity proxy. This checklist
-is the hardening you must apply before exposing it beyond a trusted network.
+Memcove is a generic, self-hostable service — install it with the
+[Helm chart](helm.md) or your own manifests, and bring your own object store, Trino,
+catalog, registry DB, and (for the proxy model) identity proxy. This checklist is the
+hardening you must apply before exposing it beyond a trusted network.
 
-!!! danger "Do not expose Memcove without a proxy + network isolation"
-    In its default configuration Memcove trusts the tenant header, so anything that can
-    reach the port can read any tenant's data. The items below are not optional for an
-    internet- or org-reachable deployment.
+!!! danger "Do not expose Memcove without authentication + network isolation"
+    In the default header configuration Memcove trusts the tenant header, so anything that
+    can reach the port can read any tenant's data. Either enable
+    [native OAuth](../configuration/auth.md#native-oauth-resource-server) or front it with
+    an authenticating proxy — and in both cases restrict the network. The items below are
+    not optional for an internet- or org-reachable deployment.
 
 ## Identity & trust boundary
 
+Pick **one** authentication model and harden it:
+
+**Native OAuth** (clients connect directly):
+
+- [ ] **Enable the resource server** (`MEMCOVE_OAUTH_ENABLED=true`) with your IdP's issuer,
+      audience, and required scopes; set `MEMCOVE_PUBLIC_URL` to the public HTTPS URL. See
+      [Native OAuth](../configuration/auth.md#native-oauth-resource-server).
+- [ ] **Map identities to tenants explicitly** with `MEMCOVE_TENANT_MAP` (fail-closed)
+      rather than defaulting the tenant to a raw `sub` claim.
+
+**Proxy / trusted header** (auth terminated at the edge):
+
 - [ ] **Front Memcove with an authenticating proxy.** It authenticates the caller and sets
       the tenant/identity header. Memcove trusts that header.
-- [ ] **Network-isolate the service** so *only* the proxy can reach the MCP port (8090) and
-      the Flight port (8815). See [Kubernetes](kubernetes.md).
 - [ ] **Strip inbound tenant headers** at the proxy and overwrite from the verified
       identity, so a caller can't spoof `x-memcove-tenant`.
 - [ ] **Use the fail-closed provisioning map** (`MEMCOVE_TENANT_SUBJECT_HEADER` +
       `MEMCOVE_TENANT_MAP`) rather than passing a raw OIDC `sub` through. See
       [Authentication & tenancy](../configuration/auth.md).
+
+**Both models:**
+
+- [ ] **Network-isolate the service** so only your proxy (header mode) or your ingress
+      (OAuth mode) can reach the MCP port (8090) and the Flight port (8815). See
+      [Kubernetes](kubernetes.md).
 
 ## Engine access control
 
@@ -52,6 +71,7 @@ is the hardening you must apply before exposing it beyond a trusted network.
 - [ ] Route the `memcove.audit` logger (structured JSON, one line per accepted
       read/derive/export) to your audit sink.
 
-Secrets (S3 keys, PG password, ticket secret) should come from your secret manager, not
-committed config. The `deploy/values.example.yaml` file maps every knob to a
-`MEMCOVE_*` env var for wiring into Helm / ArgoCD / Kustomize.
+Secrets (S3 keys, registry DSN, ticket secret) should come from your secret manager, not
+committed config — the [Helm chart](helm.md) takes them via `secrets.existingSecret`. Every
+non-secret knob maps to a `MEMCOVE_*` env var (see the
+[settings reference](../configuration/settings.md)).

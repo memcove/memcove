@@ -1,9 +1,10 @@
 # Kubernetes
 
-Memcove ships **example** manifests to adapt, not a baked deployment. Wire them into your
-own Helm chart, ArgoCD Application, or Kustomize base, pointing at your object store,
-Trino, Postgres, and identity proxy. Everything environment-specific is a `MEMCOVE_*`
-setting (see [Settings reference](../configuration/settings.md)).
+The [Helm chart](helm.md) is the supported way to run Memcove on Kubernetes — server +
+Flight + reconciler, probes, ServiceAccount/IRSA, ConfigMap, and optional Ingress and
+NetworkPolicy. This page covers the **network isolation** that the chart can enable but
+that you must get right regardless of how you deploy. Everything environment-specific is a
+`MEMCOVE_*` setting (see [Settings reference](../configuration/settings.md)).
 
 ## The trust-boundary NetworkPolicy
 
@@ -24,9 +25,10 @@ can't be sidestepped.
 
 ## Values surface
 
-The full config surface as a values file — every key maps to a `MEMCOVE_*` env var.
-Secrets (S3 keys, PG password, ticket secret) should come from your secret manager, not
-this file. Only override what you need; defaults live in the app.
+When you install with the [Helm chart](helm.md), configuration lives in its
+`values.yaml` (and the NetworkPolicy above is a chart toggle — `networkPolicy.enabled`).
+If you'd rather build your own manifests, this flat reference maps every knob to its
+`MEMCOVE_*` env var; secrets should come from your secret manager, not committed config.
 
 ```yaml title="deploy/values.example.yaml"
 --8<-- "deploy/values.example.yaml"
@@ -34,11 +36,12 @@ this file. Only override what you need; defaults live in the app.
 
 ## Deploying
 
-Point these at your infrastructure and deploy with whatever your platform uses. The two
-container entry points are:
+The [Helm chart](helm.md) wires up the three entry points for you. If you deploy by hand,
+the container commands are:
 
 - `memcove-server` — the MCP control plane (Streamable HTTP, port 8090).
 - `memcove-flight` — the Arrow Flight data plane (gRPC, port 8815), only needed if you use
   the [streaming tools](../tools/streaming.md).
+- `memcove-reconcile` — registry/catalog drift repair (run as a CronJob).
 
 See the [Production checklist](checklist.md) before exposing anything.

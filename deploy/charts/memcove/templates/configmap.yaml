@@ -41,6 +41,19 @@ data:
   MEMCOVE_TENANT_SUBJECT_HEADER: {{ .Values.config.tenancy.subjectHeader | quote }}
   MEMCOVE_TENANT_GROUP_HEADER: {{ .Values.config.tenancy.groupHeader | quote }}
 
+  # Native OAuth (resource server)
+  {{- with .Values.config.oauth }}
+  MEMCOVE_OAUTH_ENABLED: {{ .enabled | quote }}
+  {{- if .enabled }}
+  MEMCOVE_OAUTH_ISSUER: {{ .issuer | quote }}
+  MEMCOVE_OAUTH_JWKS_URI: {{ .jwksUri | quote }}
+  MEMCOVE_OAUTH_AUDIENCE: {{ .audience | quote }}
+  MEMCOVE_OAUTH_REQUIRED_SCOPES: {{ .requiredScopes | toJson | quote }}
+  MEMCOVE_OAUTH_TENANT_CLAIM: {{ .tenantClaim | quote }}
+  MEMCOVE_PUBLIC_URL: {{ .publicUrl | quote }}
+  {{- end }}
+  {{- end }}
+
   # JSON-typed settings (pydantic parses these as JSON).
   MEMCOVE_SHARED_SCHEMAS: {{ .Values.config.sharedSchemas | toJson | quote }}
   MEMCOVE_ALLOWED_S3_INGEST_PREFIXES: {{ .Values.config.allowedS3IngestPrefixes | toJson | quote }}

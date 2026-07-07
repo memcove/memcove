@@ -112,6 +112,20 @@ config:
     defaultTenant: default
     subjectHeader: ""
     groupHeader: ""
+  # Native OAuth 2.1 (resource server). Enable to let an MCP client (Claude) connect
+  # directly — Memcove validates bearer JWTs against the IdP's JWKS instead of trusting
+  # a proxy header. Leave disabled to use the trusted-header / proxy model above.
+  # See docs/configuration/auth.md and deploy/keycloak/.
+  oauth:
+    enabled: false
+    issuer: "" # e.g. https://keycloak.example.com/realms/memcove
+    jwksUri: "" # optional; derived from the issuer's OIDC discovery when empty
+    audience: memcove # expected `aud`; empty to skip the check
+    requiredScopes: [] # JSON list, e.g. ["memcove.use"]
+    tenantClaim: sub # claim used as tenant id when not in tenant_map
+    # This server's public https URL, advertised as the OAuth resource identifier.
+    # Set this to your Ingress host so clients discover the authorization server.
+    publicUrl: ""
   flight:
     ticketTtlSeconds: 300
   # Read-only shared reference schemas (JSON list).

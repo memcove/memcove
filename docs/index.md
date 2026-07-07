@@ -81,8 +81,12 @@ reaching for the wrong tool.
 
 - :material-rocket-launch: **[Quickstart](getting-started/quickstart.md)** — run the
   stack locally with Docker in a few minutes.
+- :material-docker: **[Run with Docker](getting-started/docker.md)** — pull the published
+  image and run it against your own infra.
+- :material-kubernetes: **[Install with Helm](deployment/helm.md)** — deploy to a cluster
+  with probes, secrets, and IRSA.
 - :material-connection: **[Connect an MCP client](getting-started/connecting.md)** —
-  point your agent at Memcove.
+  point your agent (or Claude, via OAuth) at Memcove.
 - :material-tools: **[MCP tool reference](tools/index.md)** — all 12 tools, verbatim.
 - :material-sitemap: **[Architecture](concepts/architecture.md)** — how the pieces fit.
 - :material-shield-lock: **[Security & isolation](concepts/security.md)** — the trust

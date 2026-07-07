@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -104,19 +105,34 @@ class Settings(BaseSettings):
     export_row_cap: int = 5_000_000
     presign_ttl_seconds: int = 3600
 
-    # Tenancy. Default: trust a tenant header set by the auth proxy (dev/simple).
-    tenant_header: str = "x-memcove-tenant"
+    # Tenancy. How an incoming caller becomes an internal tenant namespace. One seam,
+    # four presets (tenant_mode); the same rule applies to both the proxy-header path and
+    # the native-OAuth claims path, so isolation is decided in exactly one place:
+    #
+    #   "auto"    (default) backward-compatible: behave as "mapped" when a tenant_map /
+    #             tenant_subject_header is configured, otherwise trust the tenant_header
+    #             (proxy path) or the token's tenant claim (OAuth path). Good for local
+    #             dev; NOT isolated on the header path (the client picks the tenant).
+    #   "shared"  every caller resolves to ONE tenant (shared_tenant, else default_tenant).
+    #             A single shared workspace — no per-user isolation. For personal / single-
+    #             team deployments where everyone shares one memory.
+    #   "private" every VERIFIED identity gets its own tenant, derived deterministically
+    #             and injectively (hashed) from the identity, so distinct users never
+    #             collide. Full per-user isolation with no map to maintain. Needs a trusted
+    #             identity: tenant_subject_header (proxy) or the OAuth token's claim.
+    #   "mapped"  explicit tenant_map provisioning, fail-closed: an unmapped identity is
+    #             rejected (never falls through to a client-settable value). For controlled
+    #             multi-tenant where operators assign identities to named tenants.
+    tenant_mode: Literal["auto", "shared", "private", "mapped"] = "auto"
+    tenant_header: str = "x-memcove-tenant"  # "auto" dev path: client-settable tenant
     default_tenant: str = "default"
+    shared_tenant: str = ""  # "shared" mode target; empty => default_tenant
 
-    # Provisioning map (optional). When tenant_subject_header is set, the tenant is
-    # resolved by mapping the proxy-provided identity (subject, else a matching group)
-    # through tenant_map -> internal tenant id, instead of trusting a raw tenant value.
-    # This is the seam for "don't feed a raw OIDC sub straight through".
-    # Provisioning mode is fail-closed: when tenant_subject_header is set, an identity
-    # absent from tenant_map is rejected (never falls through to the raw tenant header).
-    tenant_subject_header: str = ""  # e.g. "x-auth-subject"; empty = direct tenant header
+    # Identity sources for "mapped"/"private" on the proxy-header path (the auth proxy is
+    # trusted to set these; the raw tenant_header is NOT trusted in those modes).
+    tenant_subject_header: str = ""  # e.g. "x-auth-subject"
     tenant_group_header: str = ""  # e.g. "x-auth-groups" (comma-separated)
-    tenant_map: dict[str, str] = {}  # subject/group -> internal tenant id
+    tenant_map: dict[str, str] = {}  # subject/group -> internal tenant id ("mapped" mode)
 
     # Native OAuth 2.1 (MCP resource server). When enabled, Memcove validates bearer
     # JWTs itself (against the IdP's JWKS) instead of trusting proxy headers, so a client

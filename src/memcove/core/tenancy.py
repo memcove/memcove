@@ -1,14 +1,24 @@
 """Tenant resolution seam.
 
-Memcove sits behind an authenticating proxy that sets trusted headers. This module
-turns those headers into a normalized internal tenant namespace — either directly
-(``tenant_header``) or via a configurable provisioning map from a verified identity
-(subject/group) to an internal id. It is the single place tenant identity is decided;
-everything downstream keys on the normalized namespace it returns.
+The single place a caller's identity becomes an internal tenant namespace. Both entry
+points — the trusted-proxy-header path (``resolve_tenant``) and the native-OAuth claims
+path (``resolve_tenant_from_claims``) — dispatch on ``settings.tenant_mode`` so isolation
+is decided by one rule regardless of how the caller authenticated. Everything downstream
+keys on the normalized ``t_<id>`` namespace returned here.
+
+Modes (see ``config.py`` for the operator-facing description):
+
+* ``auto``    backward-compatible default — mapped when a map/subject header is set, else
+              trust the tenant header (proxy) or the token's tenant claim (OAuth).
+* ``shared``  everyone → one tenant (``shared_tenant`` / ``default_tenant``).
+* ``private`` every verified identity → its own tenant, derived injectively by hashing the
+              identity so distinct users can never collide.
+* ``mapped``  explicit ``tenant_map``, fail-closed (unmapped identities rejected).
 """
 
 from __future__ import annotations
 
+import hashlib
 import re
 
 from memcove.core.config import get_settings
@@ -46,43 +56,62 @@ def _header(headers: dict[str, str], name: str) -> str | None:
     return None
 
 
-def _map_identity(headers: dict[str, str], settings) -> str | None:
-    """Map a proxy-provided identity (subject, else a matching group) to a tenant id."""
-    subject = _header(headers, settings.tenant_subject_header)
+def _groups(value: str | None) -> list[str]:
+    return [g.strip() for g in (value or "").split(",") if g.strip()]
+
+
+def _shared_tenant(settings) -> str:
+    """The single namespace all callers share in ``shared`` mode."""
+    return normalize_tenant(settings.shared_tenant or settings.default_tenant)
+
+
+def _private_tenant(identity: str) -> str:
+    """Derive a per-identity namespace that is deterministic *and injective*.
+
+    A raw identity (an OIDC ``sub``, a subject header) may be any string, and merely
+    sanitizing it into a namespace is not injective — ``a.b`` and ``a_b`` would both
+    normalize to ``t_a_b`` and share data across two different users. Hashing guarantees
+    distinct identities map to distinct namespaces, so per-user isolation holds for any
+    identity while staying stable across a user's sessions.
+    """
+    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:16]
+    return normalize_tenant(f"u{digest}")
+
+
+def _mapped_tenant(subject: str | None, groups: list[str], settings) -> str:
+    """Resolve via ``tenant_map`` (subject first, then a matching group). Fail-closed."""
     if subject and subject in settings.tenant_map:
-        return settings.tenant_map[subject]
-    groups = _header(headers, settings.tenant_group_header) or ""
-    for group in (g.strip() for g in groups.split(",")):
-        if group and group in settings.tenant_map:
-            return settings.tenant_map[group]
-    return None
+        return normalize_tenant(settings.tenant_map[subject])
+    for group in groups:
+        if group in settings.tenant_map:
+            return normalize_tenant(settings.tenant_map[group])
+    raise TenancyError("caller identity is not provisioned to any tenant")
 
 
 def resolve_tenant_from_claims(claims: dict) -> str:
-    """Resolve the tenant from a *verified* OAuth token's claims (native OAuth mode).
-
-    Same fail-closed provisioning semantics as the header path, but the identity comes
-    from a validated JWT rather than a proxy header:
-
-    1. If ``tenant_map`` is configured, map the token's ``sub`` (else a matching group/
-       role) through it, and **reject** an unmapped identity — never fall through.
-    2. Otherwise use the configured ``oauth_tenant_claim`` value directly (safe because
-       it's from a signed token, not client-settable).
-    """
+    """Resolve the tenant from a *verified* OAuth token's claims (native OAuth mode)."""
     settings = get_settings()
+    mode = settings.tenant_mode
     subject = claims.get("sub")
     groups = claims.get("groups") or claims.get("roles") or []
     if isinstance(groups, str):
         groups = [groups]
 
-    if settings.tenant_map:
-        if subject and subject in settings.tenant_map:
-            return normalize_tenant(settings.tenant_map[subject])
-        for group in groups:
-            if group in settings.tenant_map:
-                return normalize_tenant(settings.tenant_map[group])
-        raise TenancyError("caller identity is not provisioned to any tenant")
+    if mode == "shared":
+        return _shared_tenant(settings)
 
+    if mode == "private":
+        identity = claims.get(settings.oauth_tenant_claim) or subject
+        if not identity:
+            raise TenancyError(
+                f"private tenant mode: token has no {settings.oauth_tenant_claim!r} claim"
+            )
+        return _private_tenant(str(identity))
+
+    if mode == "mapped" or (mode == "auto" and settings.tenant_map):
+        return _mapped_tenant(subject, groups, settings)
+
+    # auto, no map: the tenant claim is from a signed token, so it's safe to use directly.
     value = claims.get(settings.oauth_tenant_claim)
     if not value:
         raise TenancyError(f"token has no {settings.oauth_tenant_claim!r} claim for tenant")
@@ -90,30 +119,32 @@ def resolve_tenant_from_claims(claims: dict) -> str:
 
 
 def resolve_tenant(headers: dict[str, str] | None) -> str:
-    """Resolve the tenant namespace from request headers.
-
-    Two modes, in order:
-
-    1. **Provisioning map** — if ``tenant_subject_header`` is configured, map the
-       verified identity through ``tenant_map`` to an internal tenant id. This is the
-       seam clients wire so a raw OIDC ``sub`` is never used as a namespace directly.
-       This mode is fail-closed: an unmapped identity is rejected, never allowed to
-       fall through to the client-settable tenant header.
-    2. **Direct header** — trust ``tenant_header`` (dev/simple), falling back to the
-       default tenant when absent.
-
-    Headers are matched case-insensitively.
-    """
+    """Resolve the tenant namespace from trusted request headers (proxy mode)."""
     settings = get_settings()
     headers = headers or {}
+    mode = settings.tenant_mode
 
-    if settings.tenant_subject_header:
-        # Provisioning mode: the tenant MUST come from the map. Never fall through
-        # to the raw, client-settable tenant header — that would let an unmapped
-        # caller self-select any tenant, the exact thing this mode exists to stop.
-        mapped = _map_identity(headers, settings)
-        if mapped is None:
-            raise TenancyError("caller identity is not provisioned to any tenant")
-        return normalize_tenant(mapped)
+    if mode == "shared":
+        return _shared_tenant(settings)
 
+    if mode == "private":
+        # A trusted identity is required — the raw, client-settable tenant header is NOT
+        # trusted here, so private isolation can't be spoofed by picking a header value.
+        subject = _header(headers, settings.tenant_subject_header)
+        if not subject:
+            raise TenancyError(
+                "private tenant mode needs a trusted identity: set tenant_subject_header "
+                "so the auth proxy supplies a verified subject"
+            )
+        return _private_tenant(subject)
+
+    if mode == "mapped" or (mode == "auto" and settings.tenant_subject_header):
+        # Fail-closed: the tenant MUST come from the map; never fall through to the raw
+        # tenant header — that would let an unmapped caller self-select any tenant.
+        subject = _header(headers, settings.tenant_subject_header)
+        groups = _groups(_header(headers, settings.tenant_group_header))
+        return _mapped_tenant(subject, groups, settings)
+
+    # auto, no subject header: trust the proxy-set tenant header (dev/simple), default when
+    # absent. This path is NOT isolated — choose shared/private/mapped for real multi-user.
     return normalize_tenant(_header(headers, settings.tenant_header))

@@ -4,6 +4,18 @@ All notable changes to Memcove are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 semantic versioning once it reaches 1.0.
 
+## [0.10.0] - 2026-07-07
+
+### Added
+- **Tenancy presets (`MEMCOVE_TENANT_MODE`)** — one setting governs how a caller becomes an
+  internal tenant, across both the proxy-header and native-OAuth paths: `shared` (everyone
+  → one tenant, via `MEMCOVE_SHARED_TENANT`), `private` (every verified identity → its own
+  tenant, derived by hashing the identity so it's deterministic *and* injective — distinct
+  users can never collide), `mapped` (explicit `MEMCOVE_TENANT_MAP`, fail-closed), and
+  `auto` (the default, fully backward-compatible with prior behavior). `private` gives
+  proper per-user isolation with no map to maintain and ignores the client-settable tenant
+  header so it can't be spoofed. See `docs/configuration/auth.md`.
+
 ## [0.9.0] - 2026-07-07
 
 ### Added

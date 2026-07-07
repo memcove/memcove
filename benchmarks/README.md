@@ -63,7 +63,7 @@ uv run memcove-dcf --synthetic                   # offline, deterministic
 | Flag | Default | Meaning |
 | --- | --- | --- |
 | `<tickers>` | universe | positional: one or more tickers to value |
-| `--method` | `fcff` | `fcff` (unlevered FCF at WACC) or `simple` (FCFE proxy at cost of equity) |
+| `--method` | `fcff` | `fcff` (OCF-based unlevered FCF at WACC), `ebit-fcff` (EBIT-based FCFF at WACC), or `simple` (FCFE proxy at cost of equity) |
 | `--proj-years` | 5 | explicit forecast horizon |
 | `--rf` | 0.043 | risk-free rate |
 | `--erp` | 0.05 | equity risk premium (cost of equity = `rf + beta·erp`) |
@@ -75,32 +75,39 @@ uv run memcove-dcf --synthetic                   # offline, deterministic
 `proj_fcf` (× `proj_years`, POWER discounting) → `valuation` (Σ PV + terminal value) →
 `fair_value` (enterprise → equity → per-share, upside vs price).
 
-**Two methods:**
+**Three methods:**
 
 ```
-fcff (default) — proper enterprise DCF
+fcff (default) — enterprise DCF from operating cash flow
   FCFF      = OCF + interest·(1−tax) + capex          (unlevered)
   disc_rate = WACC = (E/V)·Re + (D/V)·Rd·(1−tax)      (Re = rf + beta·erp via CAPM)
+
+ebit-fcff — textbook enterprise DCF from the income statement
+  FCFF      = EBIT·(1−tax) + D&A − CapEx − ΔNWC       (better for capital-heavy firms)
+  disc_rate = WACC (as above)
 
 simple — quick levered proxy
   FCF       = OCF + capex                             (capex is negative)
   disc_rate = CAPM cost of equity (Re)
 
-both:  growth = historical FCF CAGR, clamped to [−2%, 12%]
+all:   growth = historical FCF CAGR, clamped to [−2%, 12%]
        EV     = Σ FCFₙ/(1+r)ⁿ + [FCF_N·(1+g_term)/(r−g_term)]/(1+r)ᴺ
        equity = EV − net debt   fair/share = equity/shares   upside = fair/price − 1
 ```
 
-The `fcff` method uses the income statement (interest expense, effective tax rate) plus
+The WACC methods use the income statement (EBIT, interest expense, effective tax rate) plus
 market weights to compute a real per-company WACC, so high-beta names get a higher discount
 rate (e.g. NVDA ~15% vs a low-beta defensive ~5%).
 
-**Caveats — illustrative, not investment advice.** Even `fcff` leans on OCF+after-tax-interest
-as the FCFF base (rather than EBIT·(1−t)+D&A−CapEx−ΔNWC), a single historical-CAGR growth
-assumption, and book debt as a market-value proxy; it drops firms with non-positive FCF
-(e.g. banks). Low-beta names get low WACCs and correspondingly high terminal multiples — a
-real DCF sensitivity to be read with care. The point is the **pipeline** — real fundamentals
-through a transparent multi-hop DAG in Memcove — not the price targets.
+**Caveats — illustrative, not investment advice.** All methods use a single historical-CAGR
+growth assumption and book debt as a market-value proxy, and drop firms with non-positive FCF.
+That exclusion is structural for some issuers: a bank, or an automaker with a large captive
+finance arm (e.g. Volkswagen — `VOW3.DE`), has non-positive consolidated FCF under *every*
+method here, because financing receivables swing working capital and cash flow; a real
+valuation would segment the finance business. Low-beta names also get low WACCs and
+correspondingly high terminal multiples — a real DCF sensitivity to be read with care. The
+point is the **pipeline** — real fundamentals through a transparent multi-hop DAG in Memcove —
+not the price targets.
 
 Both workloads are **tooling only** (no `src/memcove` behavior change) beyond the `bench`
 optional extra and the two console entry points.

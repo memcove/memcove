@@ -6,12 +6,16 @@ cover the pure-Python surface: the synthetic fallback and the statement-row look
 
 from __future__ import annotations
 
-import pandas as pd
+import pytest
 
 from memcove.benchmarks import dcf
 
+# numpy/pandas ship only with the `bench` extra, so each test skips cleanly without it (this
+# keeps the module importable in the lean dev-only CI env — no collection error).
+
 
 def test_synthetic_data_is_well_formed():
+    pytest.importorskip("numpy")
     fund, market = dcf._synthetic(["AAA", "BBB"])
 
     # every ticker has a multi-year history and a market snapshot
@@ -20,9 +24,11 @@ def test_synthetic_data_is_well_formed():
     assert len(fund) == len(market) * 4  # 4 fiscal years each
 
     f = fund[0]
-    assert set(f) == {"ticker", "fiscal_year", "ocf", "capex", "interest", "tax_rate"}
+    assert set(f) == {"ticker", "fiscal_year", "ocf", "capex", "da", "change_in_wc",
+                      "interest", "ebit", "tax_rate"}
     assert f["ocf"] > 0 and f["capex"] < 0  # capex reported negative, so FCF = ocf + capex
     assert f["interest"] >= 0 and 0 < f["tax_rate"] < 1  # WACC inputs for the fcff method
+    assert f["ebit"] > 0 and f["da"] > 0  # EBIT + D&A add-back for the ebit-fcff method
 
     m = market[0]
     assert set(m) == {"ticker", "price", "shares", "beta", "total_debt", "cash"}
@@ -30,11 +36,13 @@ def test_synthetic_data_is_well_formed():
 
 
 def test_synthetic_is_deterministic():
+    pytest.importorskip("numpy")
     # deterministic seeds → identical output across runs (reproducible benchmarks)
     assert dcf._synthetic(["AAA"]) == dcf._synthetic(["AAA"])
 
 
 def test_row_lookup_matches_first_candidate_and_tolerates_missing():
+    pd = pytest.importorskip("pandas")
     df = pd.DataFrame(
         {"2023": [100.0, -30.0]},
         index=["Operating Cash Flow", "Capital Expenditure"],

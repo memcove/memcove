@@ -9,11 +9,14 @@ income statement + market/balance-sheet snapshot), loads it into Memcove, and ru
     market ────────────────────────────────────┼─▶ dcf_base ─▶ proj_fcf ─▶ valuation ─▶ fair_value
     dcf_params ─────────────────────────────────┘         (× proj_years)
 
-Two methods (`--method`):
+Three methods (`--method`):
 
-  fcff  (default) — proper enterprise DCF:
+  fcff  (default) — enterprise DCF from operating cash flow:
       FCFF      = OCF + interest·(1−tax) + capex        (unlevered free cash flow)
       disc_rate = WACC = (E/V)·Re + (D/V)·Rd·(1−tax)    (Re via CAPM = rf + beta·erp)
+  ebit-fcff — textbook enterprise DCF from the income statement:
+      FCFF      = EBIT·(1−tax) + D&A − CapEx − ΔNWC     (better for capital-heavy firms)
+      disc_rate = WACC (as above)
   simple — quick levered proxy:
       FCF       = OCF + capex
       disc_rate = CAPM cost of equity (Re)
@@ -47,11 +50,18 @@ UNIVERSE = [
     "PEP", "HD", "MCD", "V", "MA", "UNH", "XOM", "CVX", "WMT", "COST",
 ]
 
-# Per-method free-cash-flow definition (capex is reported negative → adding it subtracts spend).
+# Per-method free-cash-flow definition. yfinance cash-flow signs: capex and change_in_wc are
+# already cash-flow-signed (capex negative; a WC build is negative), D&A is a positive add-back.
 FCF_EXPR = {
     "simple": "ocf + capex",
     "fcff": "ocf + abs(interest) * (1 - tax_rate) + capex",
+    # textbook unlevered FCFF from the income statement: EBIT(1−t) + D&A − CapEx − ΔNWC
+    "ebit-fcff": "ebit * (1 - tax_rate) + da + capex + change_in_wc",
 }
+
+# fcff and ebit-fcff both discount at WACC; simple uses the cost of equity.
+def _discount_method(method: str) -> str:
+    return "simple" if method == "simple" else "fcff"
 
 # Per-method discount rate, both emitting a uniform schema so downstream steps are shared.
 DISCOUNT_SQL = {
@@ -111,8 +121,8 @@ def build_dag(method: str) -> list[tuple[str, str, str]]:
         ),
         (
             "discount_rate",
-            "per-company discount rate (WACC for fcff, cost of equity for simple)",
-            DISCOUNT_SQL[method],
+            "per-company discount rate (WACC for fcff/ebit-fcff, cost of equity for simple)",
+            DISCOUNT_SQL[_discount_method(method)],
         ),
         (
             "dcf_base",
@@ -239,19 +249,29 @@ def _fetch_yfinance(tickers: list[str]) -> tuple[list[dict], list[dict]]:
             ocf_row = _row(cf, "Operating Cash Flow", "Total Cash From Operating Activities",
                            "Cash Flow From Continuing Operating Activities")
             capex_row = _row(cf, "Capital Expenditure", "Capital Expenditures")
+            da_row = _row(cf, "Depreciation And Amortization", "Depreciation Amortization Depletion",
+                          "Depreciation")
+            wc_row = _row(cf, "Change In Working Capital")
             interest_row = _row(income, "Interest Expense", "Interest Expense Non Operating")
+            ebit_row = _row(income, "EBIT", "Operating Income", "Total Operating Income As Reported")
             rows = []
             for col in cf.columns:
                 ocf = ocf_row.get(col)
                 if ocf is None or pd.isna(ocf):
                     continue
                 yr = int(col.year)
-                capex = capex_row.get(col)
+
+                def _f(row, key=col):  # noqa: B023 - key bound per iteration
+                    v = row.get(key)
+                    return 0.0 if v is None or pd.isna(v) else float(v)
+
                 interest = _by_year(interest_row, yr)
+                ebit = _by_year(ebit_row, yr)
                 rows.append({
                     "ticker": t, "fiscal_year": yr, "ocf": float(ocf),
-                    "capex": 0.0 if capex is None or pd.isna(capex) else float(capex),
+                    "capex": _f(capex_row), "da": _f(da_row), "change_in_wc": _f(wc_row),
                     "interest": 0.0 if interest is None or pd.isna(interest) else abs(float(interest)),
+                    "ebit": 0.0 if ebit is None or pd.isna(ebit) else float(ebit),
                     "tax_rate": _tax_rate(income, yr),
                 })
             if not rows:
@@ -286,7 +306,10 @@ def _synthetic(tickers: list[str]) -> tuple[list[dict], list[dict]]:
             fund.append({
                 "ticker": t, "fiscal_year": yr, "ocf": round(ocf, 0),
                 "capex": round(-ocf * capex_frac, 0),
+                "da": round(ocf * float(rng.uniform(0.1, 0.3)), 0),
+                "change_in_wc": round(ocf * float(rng.uniform(-0.08, 0.05)), 0),
                 "interest": round(debt * float(rng.uniform(0.03, 0.06)), 0),
+                "ebit": round(ocf * float(rng.uniform(0.85, 1.15)), 0),
                 "tax_rate": tax_rate,
             })
         shares = float(rng.uniform(3e8, 8e9))
@@ -306,8 +329,9 @@ def _synthetic(tickers: list[str]) -> tuple[list[dict], list[dict]]:
 def main() -> None:
     ap = argparse.ArgumentParser(description="Memcove DCF valuation pipeline")
     ap.add_argument("tickers", nargs="*", help="one or more tickers (default: ~20 US large caps)")
-    ap.add_argument("--method", choices=["fcff", "simple"], default="fcff",
-                    help="fcff = unlevered FCF discounted at WACC (default); simple = FCFE proxy at Re")
+    ap.add_argument("--method", choices=["fcff", "ebit-fcff", "simple"], default="fcff",
+                    help="fcff = OCF-based unlevered FCF at WACC (default); ebit-fcff = "
+                         "EBIT(1-t)+D&A-CapEx-dNWC at WACC; simple = FCFE proxy at cost of equity")
     ap.add_argument("--proj-years", type=int, default=5, help="explicit forecast horizon")
     ap.add_argument("--rf", type=float, default=0.043, help="risk-free rate")
     ap.add_argument("--erp", type=float, default=0.05, help="equity risk premium")
@@ -394,7 +418,7 @@ def _fmt_money(x) -> str:
 
 
 def _print_leaderboard(res, method: str) -> None:
-    disc_label = "wacc_%" if method == "fcff" else "coe_%"
+    disc_label = "coe_%" if method == "simple" else "wacc_%"
     print(f"\n-- valuation ({method}): fair value vs market price --")
     print(f"  {'ticker':<8}{'price':>11}{'fair_value':>13}{disc_label:>9}{'upside_%':>11}")
     print("  " + "-" * 52)
@@ -411,14 +435,15 @@ def _print_detail(tenant: str, ticker: str, method: str) -> None:
               f"cash flow (e.g. banks and negative-FCF firms are excluded).")
         return
     d = dict(zip(res.columns, res.rows[0]))
-    rate_name = "WACC (discount rate)" if method == "fcff" else "cost of equity (discount rate)"
+    wacc_method = method != "simple"
+    rate_name = "WACC (discount rate)" if wacc_method else "cost of equity (discount rate)"
     print(f"\n== {ticker} DCF — method={method} ==")
     rows = [
         ("base FCF (latest)", _fmt_money(d["base_fcf"])),
         ("FCF growth (CAGR)", f"{100 * d['growth']:.1f}%"),
         ("cost of equity (Re)", f"{100 * d['re']:.1f}%"),
     ]
-    if method == "fcff":
+    if wacc_method:
         rows += [
             ("after-tax cost of debt", "n/a" if d["rd_after_tax"] is None else f"{100 * d['rd_after_tax']:.1f}%"),
             ("equity weight (E/V)", f"{100 * d['equity_weight']:.0f}%"),

@@ -20,6 +20,7 @@ dataset **from** datasets already in memory, use [`derive_dataset`](querying.md#
 | `source` | `dict` | — | Where the data comes from — see the source shapes below. |
 | `mode` | `"create"` \| `"replace"` \| `"append"` | `"create"` | create = fail if it exists, replace = overwrite, append = add rows. |
 | `tags` | `list[str]` \| `null` | `null` | Optional labels to organize and later filter datasets. |
+| `target` | `"lakehouse"` \| `"scratch"` | `"lakehouse"` | Where to store it — `scratch` uses the ephemeral [scratchpad plane](../concepts/scratchpad.md) (inline sources only). |
 
 **`source` shapes**
 

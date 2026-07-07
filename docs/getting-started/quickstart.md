@@ -28,6 +28,10 @@ The `--wait` flag blocks until every service (Trino included) reports healthy, s
 there's no need to guess at a startup delay. The MinIO console is at
 `http://localhost:9001` (user `minio`, password `minio12345`).
 
+An optional `mysql` service (for exercising the MySQL registry backend) sits behind a
+Compose profile and is skipped by default — start it with
+`docker compose --profile mysql up -d --wait`.
+
 ## 2. Install Memcove
 
 ```bash

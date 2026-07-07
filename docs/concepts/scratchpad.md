@@ -40,7 +40,7 @@ query_memory(sql="SELECT p.name FROM people p JOIN scratch.adults a ON a.id = p.
 Scratch supports `derive` (from any query) and `remember` with **inline** sources only
 (it's for small data). `s3_parquet` / `upload_handle` / Flight always target the
 lakehouse. Scratch datasets are **not** recorded in the durable registry — they have no
-lineage and aren't returned by `list_datasets`; they're meant to be transient.
+lineage and aren't returned by `list_memory`; they're meant to be transient.
 
 !!! note "Isolation"
     A caller's `scratch.<name>` always resolves to *their own* scratch schema. One tenant

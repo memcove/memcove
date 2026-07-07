@@ -14,7 +14,7 @@ The chart is published as an OCI artifact and is also in the repo. Either works:
 
     ```bash
     helm install memcove oci://ghcr.io/memcove/charts/memcove \
-      --version 0.7.0 -f my-values.yaml
+      --version 0.3.1 -f my-values.yaml
     ```
 
 === "From a clone"
@@ -37,7 +37,7 @@ Override only what your environment needs; the rest have defaults. A realistic
 
 ```yaml
 image:
-  tag: "0.7.0"
+  tag: ""   # defaults to the chart's appVersion (the matching release)
 
 serviceAccount:
   # AWS IRSA: the pod assumes this role for S3, so no static keys are needed.

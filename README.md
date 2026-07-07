@@ -24,8 +24,10 @@ Isolation is **private per tenant** (`<tenant>.<label>` → Iceberg table
 (`core/sql_guard.py`): only read-only SELECTs, every table reference qualified to
 the caller's namespace, cross-namespace/catalog references rejected.
 
-> Auth is deferred. The tenant is read from the `x-memcove-tenant` header today;
-> when real auth lands, only `core/tenancy.py` changes.
+> **Auth**: two models, both resolving to the tenant namespace through the single
+> `core/tenancy.py` seam — a **trusted-header / proxy** mode (default) and **native
+> OAuth 2.1**, where Memcove validates bearer JWTs itself so clients like Claude connect
+> directly. See the [auth docs](https://memcove.github.io/memcove/configuration/auth/).
 
 ## MCP tools
 
@@ -33,15 +35,18 @@ Named as a **memory family** so agents reach for them by intent:
 
 | tool | purpose |
 |------|---------|
-| `remember_dataset(name, source, mode, tags)` | store data: inline / `s3_parquet` / `upload_handle` |
+| `remember_dataset(name, source, mode, tags, target)` | store data: inline / `s3_parquet` / `upload_handle` (`target=lakehouse\|scratch`) |
 | `query_memory(sql, limit)` | guarded read-only SELECT over datasets, capped preview |
-| `derive_dataset(new_name, sql, mode, tags)` | persist a computed table (CTAS) + lineage |
+| `derive_dataset(new_name, sql, mode, tags, target)` | persist a computed table (CTAS) + lineage (`target=lakehouse\|scratch`) |
 | `recall_dataset(name, mode)` | read one dataset: `preview` \| `schema` \| `stats` |
 | `inspect_dataset(name)` | schema, source, tags, lineage, row count |
 | `list_memory(tags)` | list a tenant's datasets |
 | `export_dataset(fmt, name\|sql)` | materialize to S3, return presigned URL |
+| `discover_reference_data()` | list the shared read-only reference schemas |
 | `start_large_upload(name)` | presigned PUT URL for out-of-band parquet upload |
 | `forget_dataset(name)` | permanently delete a dataset |
+| `stream_dataset(name\|sql)` | Arrow Flight: stream a dataset/query out (bulk read) |
+| `open_ingest_stream(name, mode)` | Arrow Flight: stream bulk rows in |
 
 Each description spells out *when to use this vs. its neighbors*, and the server
 ships an `instructions` block framing the whole toolkit. Resources:
@@ -58,11 +63,11 @@ uv sync --extra dev         # or: pip install -e ".[dev]"
 cp .env.example .env
 
 # 3. unit tests (no infra needed)
-pytest -m "not integration"
+uv run pytest -m "not integration"
 
 # 4. end-to-end smoke against the running stack
-python scripts/smoke.py
-pytest -m integration
+uv run python scripts/smoke.py
+uv run pytest -m integration
 
 # 5. run the MCP server (Streamable HTTP on :8090)
 memcove-server
@@ -93,11 +98,20 @@ uv run python scripts/pipeline_demo.py         # guided pipeline (always complet
   `monthly_revenue`/`top_customers` (joins + rollups, lineage tracked) → export
   the leaderboard CSV → narrative. Recommended for a dependable end-to-end run.
 
-## Roadmap
+## Beyond the core
 
-- **M3 (fast-follow):** Arrow Flight streaming data plane
-  (`src/memcove/data_plane/flight_server.py`).
-- **Later:** real auth (bearer → OAuth 2.1) behind the `core/tenancy.py` seam.
+Shipped on top of the control/data-plane core (see the
+[CHANGELOG](CHANGELOG.md) and [docs](https://memcove.github.io/memcove/) for detail):
+
+- **Arrow Flight streaming data plane** (`stream_dataset` / `open_ingest_stream`) for
+  bulk in/out that bypasses MCP responses.
+- **Native OAuth 2.1** resource server alongside the trusted-header/proxy model.
+- **Pluggable registry** — SQLite (zero-setup local), Postgres, or MySQL.
+- **Scratchpad plane** — an optional ephemeral DuckDB-behind-Trino store you can `JOIN`
+  with lakehouse and reference tables in one query.
+- **Container image + Helm chart** for Docker/Kubernetes deployment.
+- **Example workloads** (`memcove-bench`, `memcove-dcf`) that drive Memcove with real
+  market data — see [`benchmarks/`](benchmarks/README.md).
 
 ## Contributing
 

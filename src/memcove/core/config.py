@@ -62,7 +62,12 @@ class Settings(BaseSettings):
     flight_ticket_secret: str = "dev-insecure-change-me"
     flight_ticket_ttl_seconds: int = 300  # signed tickets expire after this many seconds
 
-    # Postgres registry
+    # Registry DB. The DSN scheme selects the backend:
+    #   postgresql://…  (production default, pooled)
+    #   sqlite:///memcove.db  or  sqlite://  (embedded; zero-setup local dev)
+    #   mysql://user:pass@host/db  (requires the `mysql` extra)
+    # registry_dsn takes precedence; pg_dsn is kept for backward compatibility.
+    registry_dsn: str | None = None
     pg_dsn: str = "postgresql://memcove:memcove@localhost:5433/memcove"
     # Connection pool: the registry opens a fresh connection per op otherwise, and the
     # reconciler + synchronous read-repair add per-op churn. min_size connections are
@@ -117,6 +122,10 @@ class Settings(BaseSettings):
     # prefixes. Empty list = agent s3_parquet ingest is DISABLED (fail closed) to avoid
     # a confused-deputy read of any bucket the service credential can reach.
     allowed_s3_ingest_prefixes: list[str] = []
+
+    def registry_url(self) -> str:
+        """The active registry DSN — ``registry_dsn`` if set, else ``pg_dsn``."""
+        return self.registry_dsn or self.pg_dsn
 
     def static_s3_credentials(self) -> tuple[str, str] | None:
         """The explicit S3 access/secret key pair, or ``None`` to defer to the AWS

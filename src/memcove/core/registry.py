@@ -1,8 +1,12 @@
-"""Postgres control-plane registry.
+"""Control-plane registry — backend-agnostic.
 
 Source of truth for object *metadata* — tags, source, producing SQL, and the
 lineage graph. The Iceberg catalog remains the source of truth for the data and
 schema; this just adds what the catalog doesn't track conveniently.
+
+The store is pluggable (Postgres, SQLite, or MySQL), selected by the registry DSN
+scheme; the per-database differences live in ``registry_backends.py``. Callers use
+the functions here and never see the backend.
 """
 
 from __future__ import annotations
@@ -11,133 +15,95 @@ import atexit
 import logging
 from typing import Any
 
-import psycopg
-from psycopg.rows import dict_row
-from psycopg_pool import ConnectionPool
-
 from memcove.core.config import get_settings
+from memcove.core.registry_backends import RegistryBackend, make_backend
 
 logger = logging.getLogger("memcove.registry")
 
-_DDL = """
-CREATE TABLE IF NOT EXISTS memcove_objects (
-    tenant        text        NOT NULL,
-    label         text        NOT NULL,
-    table_ident   text        NOT NULL,
-    source        text        NOT NULL,
-    source_ref    text,
-    producing_sql text,
-    tags          text[]      NOT NULL DEFAULT '{}',
-    created_at    timestamptz NOT NULL DEFAULT now(),
-    updated_at    timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (tenant, label)
-);
-
-CREATE TABLE IF NOT EXISTS memcove_lineage (
-    child_tenant text NOT NULL,
-    child_label  text NOT NULL,
-    parent_label text NOT NULL,
-    PRIMARY KEY (child_tenant, child_label, parent_label)
-);
-
--- Reconciler grace tracking: how many consecutive sweeps a registry row has been
--- absent from the Iceberg catalog. A row is only deleted once it has been absent
--- for reconcile_min_absent_sweeps sweeps (and a final live re-check confirms it).
-CREATE TABLE IF NOT EXISTS memcove_reconcile_tombstone (
-    tenant       text NOT NULL,
-    label        text NOT NULL,
-    absent_sweeps int NOT NULL DEFAULT 1,
-    PRIMARY KEY (tenant, label)
-);
-"""
+_backend: RegistryBackend | None = None
+_backend_dsn: str | None = None
+_atexit_registered = False
 
 
-_pool: ConnectionPool | None = None
-
-
-def _get_pool() -> ConnectionPool:
-    """Lazily open a process-wide connection pool.
+def _get() -> RegistryBackend:
+    """Lazily build the process-wide backend for the current DSN.
 
     Built on first use (not at import) so importing the registry never requires a
-    reachable Postgres. Keyed off the current settings' DSN; ``close_pool()`` resets it
-    if the DSN changes (e.g. between tests).
-
-    Fork note: the pool and its background threads do NOT survive ``os.fork()``. Every
-    current entrypoint is single-process (FastMCP streamable-http, pyarrow Flight's C++
-    threadpool, the reconciler CLI), so opening it eagerly in ``init_db()`` at startup is
-    safe. If this is ever deployed behind a preforking server (gunicorn/uvicorn
-    ``--workers>1`` or ``preload_app``), open the pool per worker (post-fork) or add a
-    post-fork ``close_pool()`` hook — a forked parent-built pool shares sockets and
-    orphans its maintenance threads.
+    reachable database. Rebuilt if the DSN changes (e.g. between tests).
     """
-    global _pool
-    if _pool is None:
-        s = get_settings()
-        _pool = ConnectionPool(
-            s.pg_dsn,
-            min_size=s.pg_pool_min_size,
-            max_size=s.pg_pool_max_size,
-            timeout=s.pg_pool_timeout,
-            # Validate each connection on borrow. After a Postgres restart or an
-            # idle/firewall drop, a pooled socket goes dead; without this check the pool
-            # hands out the dead connection and the next query raises OperationalError
-            # (and the guarded write emits a FALSE "registry down" drift signal while the
-            # registry is actually up). The old connect-per-call path never had stale
-            # connections; check_connection keeps parity by discarding + replacing them.
-            check=ConnectionPool.check_connection,
-            name="memcove-registry",
-            open=True,
+    global _backend, _backend_dsn, _atexit_registered
+    s = get_settings()
+    dsn = s.registry_url()
+    if _backend is None or _backend_dsn != dsn:
+        if _backend is not None:
+            _backend.close()
+        _backend = make_backend(
+            dsn,
+            pool_min=s.pg_pool_min_size,
+            pool_max=s.pg_pool_max_size,
+            pool_timeout=s.pg_pool_timeout,
         )
-        # Long-lived servers (MCP, Flight) have no explicit shutdown hook; release the
-        # pool cleanly at interpreter exit. Idempotent, so the reconciler's own
-        # close_pool() in a finally is unaffected.
-        atexit.register(close_pool)
-    return _pool
+        _backend_dsn = dsn
+        if not _atexit_registered:
+            atexit.register(close_pool)
+            _atexit_registered = True
+    return _backend
 
 
 def close_pool() -> None:
-    """Close and drop the pool (idempotent). For shutdown and test isolation."""
-    global _pool
-    if _pool is not None:
-        _pool.close()
-        _pool = None
-
-
-def _conn():
-    """A pooled connection context manager. The ``with`` block commits on success and
-    rolls back on exception, then the connection is returned to the pool (not closed).
-
-    Formerly a fresh ``autocommit=True`` connection per call. Routing single-statement
-    ops through the pool's commit-on-exit context is equivalent, and it makes the few
-    multi-statement callers (e.g. ``delete_object``) atomic as a bonus.
-    """
-    return _get_pool().connection()
-
-
-def _conn_tx():
-    """Alias of :func:`_conn` kept for call-site intent: several statements that must
-    land atomically. Both now share the pool and commit on clean ``with`` exit."""
-    return _get_pool().connection()
+    """Close and drop the backend (idempotent). For shutdown and test isolation."""
+    global _backend, _backend_dsn
+    if _backend is not None:
+        _backend.close()
+        _backend = None
+        _backend_dsn = None
 
 
 def init_db() -> None:
-    with _conn() as conn, conn.cursor() as cur:
-        cur.execute(_DDL)
+    b = _get()
+    with b.connection() as conn:
+        for stmt in b.ddl():
+            b.execute(conn, stmt)
 
 
 def ping() -> None:
     """Cheap liveness probe for the registry — raises if the DB is unreachable.
 
-    Used by the server's ``/ready`` endpoint. Borrows a pooled connection (which
-    is health-checked on borrow) and runs a trivial query.
+    Used by the server's ``/ready`` endpoint.
     """
-    with _conn() as conn, conn.cursor() as cur:
-        cur.execute("SELECT 1")
-        cur.fetchone()
+    b = _get()
+    with b.connection() as conn:
+        b.query_one(conn, "SELECT 1")
 
 
-def _record_object_stmt(
-    cur,
+# ---------------------------------------------------------------- tag helpers
+
+
+def _replace_tags(b: RegistryBackend, conn, tenant: str, label: str, tags: list[str] | None) -> None:
+    b.execute(conn, "DELETE FROM memcove_object_tags WHERE tenant = ? AND label = ?", (tenant, label))
+    for tag in dict.fromkeys(tags or []):  # dedupe, preserve order
+        b.execute(
+            conn,
+            "INSERT INTO memcove_object_tags (tenant, label, tag) VALUES (?, ?, ?)",
+            (tenant, label, tag),
+        )
+
+
+def _tags_for(b: RegistryBackend, conn, tenant: str, label: str) -> list[str]:
+    rows = b.query_all(
+        conn,
+        "SELECT tag FROM memcove_object_tags WHERE tenant = ? AND label = ? ORDER BY tag",
+        (tenant, label),
+    )
+    return [r["tag"] for r in rows]
+
+
+# ---------------------------------------------------------------- writes
+
+
+def _upsert_object(
+    b: RegistryBackend,
+    conn,
     tenant: str,
     label: str,
     table_ident: str,
@@ -146,41 +112,24 @@ def _record_object_stmt(
     producing_sql: str | None,
     tags: list[str] | None,
 ) -> None:
-    """Upsert one object row on an open cursor (caller controls the transaction)."""
-    cur.execute(
-        """
-        INSERT INTO memcove_objects
-            (tenant, label, table_ident, source, source_ref, producing_sql, tags)
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
-        ON CONFLICT (tenant, label) DO UPDATE SET
-            table_ident   = EXCLUDED.table_ident,
-            source        = EXCLUDED.source,
-            source_ref    = EXCLUDED.source_ref,
-            producing_sql = EXCLUDED.producing_sql,
-            tags          = EXCLUDED.tags,
-            updated_at    = now()
-        """,
-        (tenant, label, table_ident, source, source_ref, producing_sql, tags or []),
+    b.execute(
+        conn,
+        b.upsert_object_sql,
+        (tenant, label, table_ident, source, source_ref, producing_sql),
     )
+    _replace_tags(b, conn, tenant, label, tags)
 
 
-def _set_lineage_stmt(cur, tenant: str, child_label: str, parent_labels: list[str]) -> None:
-    """Replace an object's lineage edges on an open cursor (caller controls the txn)."""
-    cur.execute(
-        "DELETE FROM memcove_lineage WHERE child_tenant = %s AND child_label = %s",
+def _set_lineage(b: RegistryBackend, conn, tenant: str, child_label: str, parents: list[str]) -> None:
+    b.execute(
+        conn,
+        "DELETE FROM memcove_lineage WHERE child_tenant = ? AND child_label = ?",
         (tenant, child_label),
     )
-    for parent in dict.fromkeys(parent_labels):  # dedupe, keep order
+    for parent in dict.fromkeys(parents):  # dedupe, keep order
         if parent == child_label:
             continue
-        cur.execute(
-            """
-            INSERT INTO memcove_lineage (child_tenant, child_label, parent_label)
-            VALUES (%s, %s, %s)
-            ON CONFLICT DO NOTHING
-            """,
-            (tenant, child_label, parent),
-        )
+        b.execute(conn, b.insert_lineage_sql, (tenant, child_label, parent))
 
 
 def record_object(
@@ -193,15 +142,15 @@ def record_object(
     producing_sql: str | None = None,
     tags: list[str] | None = None,
 ) -> None:
-    with _conn() as conn, conn.cursor() as cur:
-        _record_object_stmt(
-            cur, tenant, label, table_ident, source, source_ref, producing_sql, tags
-        )
+    b = _get()
+    with b.connection() as conn:
+        _upsert_object(b, conn, tenant, label, table_ident, source, source_ref, producing_sql, tags)
 
 
 def set_lineage(tenant: str, child_label: str, parent_labels: list[str]) -> None:
-    with _conn() as conn, conn.cursor() as cur:
-        _set_lineage_stmt(cur, tenant, child_label, parent_labels)
+    b = _get()
+    with b.connection() as conn:
+        _set_lineage(b, conn, tenant, child_label, parent_labels)
 
 
 def record_object_guarded(
@@ -217,35 +166,30 @@ def record_object_guarded(
 ) -> bool:
     """Record object metadata (and optionally lineage) AFTER the data write.
 
-    The object row and its lineage edges commit in a single transaction, so a
-    ``derive`` can never leave a row whose lineage silently failed to write.
+    The object row, its tags, and its lineage edges commit in a single transaction,
+    so a ``derive`` can never leave a row whose lineage silently failed to write.
 
     Returns ``True`` on success. On an *infrastructure* failure (the registry is
     unreachable) it does NOT raise: the data is already committed and queryable via
     Trino, so the write itself succeeded. It logs a structured drift signal and
-    returns ``False`` — the caller then builds a ``metadata_pending`` response from
-    the values it already has, rather than re-reading the registry that just failed.
+    returns ``False`` — the caller then builds a ``metadata_pending`` response.
 
-    Recovery is partial and honest about it: the reconciler / synchronous read-repair
-    restore *visibility* by backfilling a ``reconciled`` stub row, so the object is
-    listable and queryable again. They do NOT recover this write's lineage, tags, or
-    producing_sql — that metadata is lost if the registry never accepts this write.
-
-    Only "registry down" (``OperationalError`` / ``InterfaceError``) is swallowed. A
-    logic or data error (bad SQL, wrong param count, constraint violation) is a real
-    bug that would otherwise strip metadata off *every* write silently, so it is left
-    to raise loudly instead of being disguised as a pending-metadata success.
+    Only "registry down" (per the backend's ``is_connection_down``) is swallowed. A
+    logic or data error (bad SQL, constraint violation) is a real bug that would
+    otherwise strip metadata off *every* write silently, so it is left to raise.
     """
+    b = _get()
     try:
-        with _conn_tx() as conn, conn.cursor() as cur:
-            _record_object_stmt(
-                cur, tenant, label, table_ident, source, source_ref, producing_sql, tags
+        with b.connection() as conn:
+            _upsert_object(
+                b, conn, tenant, label, table_ident, source, source_ref, producing_sql, tags
             )
             if lineage_parents is not None:
-                _set_lineage_stmt(cur, tenant, label, lineage_parents)
+                _set_lineage(b, conn, tenant, label, lineage_parents)
         return True
-    except (psycopg.OperationalError, psycopg.InterfaceError):
-        # Registry unreachable — data is committed, so don't fail the write.
+    except Exception as exc:
+        if not b.is_connection_down(exc):
+            raise
         logger.warning(
             "registry drift: data for %s.%s committed but the registry is unreachable; "
             "read-repair will restore visibility (a reconciled stub), not this write's "
@@ -257,88 +201,111 @@ def record_object_guarded(
         return False
 
 
-def get_object(tenant: str, label: str) -> dict[str, Any] | None:
-    with _conn() as conn, conn.cursor(row_factory=dict_row) as cur:
-        cur.execute(
-            "SELECT * FROM memcove_objects WHERE tenant = %s AND label = %s",
+def delete_object(tenant: str, label: str) -> None:
+    b = _get()
+    with b.connection() as conn:
+        b.execute(conn, "DELETE FROM memcove_objects WHERE tenant = ? AND label = ?", (tenant, label))
+        b.execute(conn, "DELETE FROM memcove_object_tags WHERE tenant = ? AND label = ?", (tenant, label))
+        b.execute(
+            conn,
+            "DELETE FROM memcove_lineage WHERE child_tenant = ? AND child_label = ?",
             (tenant, label),
         )
-        return cur.fetchone()
+
+
+# ---------------------------------------------------------------- reads
+
+
+def get_object(tenant: str, label: str) -> dict[str, Any] | None:
+    b = _get()
+    with b.connection() as conn:
+        row = b.query_one(
+            conn, "SELECT * FROM memcove_objects WHERE tenant = ? AND label = ?", (tenant, label)
+        )
+        if row is not None:
+            row["tags"] = _tags_for(b, conn, tenant, label)
+        return row
 
 
 def list_objects(tenant: str, tags: list[str] | None = None) -> list[dict[str, Any]]:
-    with _conn() as conn, conn.cursor(row_factory=dict_row) as cur:
+    b = _get()
+    with b.connection() as conn:
         if tags:
-            cur.execute(
-                "SELECT * FROM memcove_objects WHERE tenant = %s AND tags && %s "
-                "ORDER BY updated_at DESC",
-                (tenant, tags),
+            placeholders = ", ".join(["?"] * len(tags))
+            rows = b.query_all(
+                conn,
+                "SELECT o.* FROM memcove_objects o WHERE o.tenant = ? AND EXISTS ("
+                "SELECT 1 FROM memcove_object_tags t "
+                "WHERE t.tenant = o.tenant AND t.label = o.label "
+                f"AND t.tag IN ({placeholders})) ORDER BY o.updated_at DESC",
+                (tenant, *tags),
             )
         else:
-            cur.execute(
-                "SELECT * FROM memcove_objects WHERE tenant = %s ORDER BY updated_at DESC",
+            rows = b.query_all(
+                conn,
+                "SELECT * FROM memcove_objects WHERE tenant = ? ORDER BY updated_at DESC",
                 (tenant,),
             )
-        return cur.fetchall()
+        # Attach tags in one pass over the tenant's tag rows.
+        tag_rows = b.query_all(
+            conn, "SELECT label, tag FROM memcove_object_tags WHERE tenant = ?", (tenant,)
+        )
+        by_label: dict[str, list[str]] = {}
+        for r in tag_rows:
+            by_label.setdefault(r["label"], []).append(r["tag"])
+        for row in rows:
+            row["tags"] = sorted(by_label.get(row["label"], []))
+        return rows
 
 
 def labels_for_tenant(tenant: str) -> list[str]:
     """All object labels the registry has for a tenant (reconciler diff input)."""
-    with _conn() as conn, conn.cursor() as cur:
-        cur.execute("SELECT label FROM memcove_objects WHERE tenant = %s", (tenant,))
-        return [r[0] for r in cur.fetchall()]
+    b = _get()
+    with b.connection() as conn:
+        rows = b.query_all(conn, "SELECT label FROM memcove_objects WHERE tenant = ?", (tenant,))
+        return [r["label"] for r in rows]
+
+
+def get_parents(tenant: str, label: str) -> list[str]:
+    b = _get()
+    with b.connection() as conn:
+        rows = b.query_all(
+            conn,
+            "SELECT parent_label FROM memcove_lineage "
+            "WHERE child_tenant = ? AND child_label = ? ORDER BY parent_label",
+            (tenant, label),
+        )
+        return [r["parent_label"] for r in rows]
+
+
+# ---------------------------------------------------------------- tombstones
 
 
 def tombstones_for_tenant(tenant: str) -> dict[str, int]:
     """Map of label -> consecutive-absent-sweep count for a tenant."""
-    with _conn() as conn, conn.cursor() as cur:
-        cur.execute(
-            "SELECT label, absent_sweeps FROM memcove_reconcile_tombstone WHERE tenant = %s",
+    b = _get()
+    with b.connection() as conn:
+        rows = b.query_all(
+            conn,
+            "SELECT label, absent_sweeps FROM memcove_reconcile_tombstone WHERE tenant = ?",
             (tenant,),
         )
-        return {r[0]: r[1] for r in cur.fetchall()}
+        return {r["label"]: r["absent_sweeps"] for r in rows}
 
 
 def bump_tombstone(tenant: str, label: str) -> None:
     """Record (or increment) that a row was absent from the catalog this sweep."""
-    with _conn() as conn, conn.cursor() as cur:
-        cur.execute(
-            """
-            INSERT INTO memcove_reconcile_tombstone (tenant, label, absent_sweeps)
-            VALUES (%s, %s, 1)
-            ON CONFLICT (tenant, label) DO UPDATE SET
-                absent_sweeps = memcove_reconcile_tombstone.absent_sweeps + 1
-            """,
-            (tenant, label),
-        )
+    b = _get()
+    with b.connection() as conn:
+        b.execute(conn, b.upsert_tombstone_sql, (tenant, label))
 
 
 def clear_tombstone(tenant: str, label: str) -> None:
     """Drop a row's absent-sweep tracking (it reappeared or was deleted)."""
-    with _conn() as conn, conn.cursor() as cur:
-        cur.execute(
-            "DELETE FROM memcove_reconcile_tombstone WHERE tenant = %s AND label = %s",
-            (tenant, label),
-        )
-
-
-def get_parents(tenant: str, label: str) -> list[str]:
-    with _conn() as conn, conn.cursor() as cur:
-        cur.execute(
-            "SELECT parent_label FROM memcove_lineage "
-            "WHERE child_tenant = %s AND child_label = %s ORDER BY parent_label",
-            (tenant, label),
-        )
-        return [r[0] for r in cur.fetchall()]
-
-
-def delete_object(tenant: str, label: str) -> None:
-    with _conn() as conn, conn.cursor() as cur:
-        cur.execute(
-            "DELETE FROM memcove_objects WHERE tenant = %s AND label = %s",
-            (tenant, label),
-        )
-        cur.execute(
-            "DELETE FROM memcove_lineage WHERE child_tenant = %s AND child_label = %s",
+    b = _get()
+    with b.connection() as conn:
+        b.execute(
+            conn,
+            "DELETE FROM memcove_reconcile_tombstone WHERE tenant = ? AND label = ?",
             (tenant, label),
         )

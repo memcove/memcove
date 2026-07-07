@@ -93,6 +93,8 @@ config:
     region: us-east-1
     pathStyle: false
     warehouseBucket: my-memcove-warehouse
+    # staging/artifacts accept a bare bucket or a bucket sub-path
+    # (e.g. my-bucket/teams/data-eng) to scope uploads/exports to a prefix you own.
     stagingBucket: my-memcove-staging
     artifactsBucket: my-memcove-artifacts
   iceberg:

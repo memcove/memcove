@@ -4,6 +4,17 @@ All notable changes to Memcove are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 semantic versioning once it reaches 1.0.
 
+## [0.9.0] - 2026-07-07
+
+### Added
+- **Bucket sub-paths for uploads/exports** — `MEMCOVE_STAGING_BUCKET` and
+  `MEMCOVE_ARTIFACTS_BUCKET` now accept either a bare bucket (`my-bucket`) or a bucket
+  with a sub-path (`my-bucket/teams/data-eng`), so a team can scope Memcove's uploads and
+  exports to a prefix it owns instead of writing at the bucket root. The path is split
+  into `(bucket, key-prefix)` internally (`storage.resolve()`); the upload-handle
+  cross-tenant binding check is prefix-aware. The Iceberg warehouse is unaffected (set via
+  `MEMCOVE_ICEBERG_WAREHOUSE`).
+
 ## [0.8.0] - 2026-07-07
 
 ### Added

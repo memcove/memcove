@@ -32,8 +32,8 @@ The defaults target the local Docker stack, so local development needs no change
 | `MEMCOVE_S3_SECRET_KEY` | str | `minio12345` | |
 | `MEMCOVE_S3_PATH_STYLE` | bool | `true` | |
 | `MEMCOVE_WAREHOUSE_BUCKET` | str | `warehouse` | |
-| `MEMCOVE_STAGING_BUCKET` | str | `memcove-staging` | upload staging |
-| `MEMCOVE_ARTIFACTS_BUCKET` | str | `memcove-artifacts` | exports |
+| `MEMCOVE_STAGING_BUCKET` | str | `memcove-staging` | upload staging; accepts `bucket` or `bucket/sub/path` to scope uploads to a prefix |
+| `MEMCOVE_ARTIFACTS_BUCKET` | str | `memcove-artifacts` | exports; accepts `bucket` or `bucket/sub/path` to scope exports to a prefix |
 
 ## Trino (read / derive / export engine)
 

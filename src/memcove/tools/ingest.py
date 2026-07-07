@@ -113,12 +113,14 @@ def _table_from_source(source: dict, tenant: str) -> tuple[pa.Table, SourceKind,
 
     if kind == "upload_handle":
         handle = source["handle"]
-        # Bind the handle to the caller: minted handles are uploads/{tenant}/...
+        # Bind the handle to the caller: minted handles are <prefix>/uploads/{tenant}/...
         # (see request_upload). Without this a caller could read another tenant's
-        # pending upload out of the shared staging bucket.
-        if not handle.startswith(f"uploads/{tenant}/"):
+        # pending upload out of the shared staging bucket. The expected key includes any
+        # configured bucket sub-path, so a handle for another prefix/tenant is rejected.
+        bucket, expected = storage.resolve(settings.staging_bucket, "uploads", tenant)
+        if not handle.startswith(expected + "/"):
             raise IngestError("upload handle does not belong to this tenant")
-        table = storage.read_parquet_table(settings.staging_bucket, handle)
+        table = storage.read_parquet_table(bucket, handle)
         return table, SourceKind.UPLOAD, handle
 
     raise IngestError(f"unknown ingest source kind {kind!r}")
@@ -188,8 +190,10 @@ def request_upload(tenant: str, label: str) -> UploadTicket:
     """Hand back a presigned PUT URL for out-of-band parquet upload."""
     label = validate_label(label)
     settings = get_settings()
-    handle = f"uploads/{tenant}/{label}-{uuid.uuid4().hex}.parquet"
-    url = storage.presign_put(settings.staging_bucket, handle, content_type="application/octet-stream")
+    bucket, handle = storage.resolve(
+        settings.staging_bucket, "uploads", tenant, f"{label}-{uuid.uuid4().hex}.parquet"
+    )
+    url = storage.presign_put(bucket, handle, content_type="application/octet-stream")
     return UploadTicket(
         upload_handle=handle,
         presigned_url=url,

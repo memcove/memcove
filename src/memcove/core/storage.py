@@ -40,6 +40,25 @@ def _settings() -> Settings:
     return get_settings()
 
 
+def resolve(location: str, *parts: str) -> tuple[str, str]:
+    """Split a bucket-or-bucket/path setting into (bucket, key) and append key parts.
+
+    ``location`` is a ``staging_bucket`` / ``artifacts_bucket`` value: a bare bucket
+    (``"my-bucket"``) or a bucket with a sub-path (``"my-bucket/teams/data-eng"``). The
+    sub-path becomes a key prefix, so::
+
+        resolve("my-bucket", "uploads", "t_acme", "x.parquet")
+            -> ("my-bucket", "uploads/t_acme/x.parquet")
+        resolve("my-bucket/teams/data-eng", "uploads", "t_acme", "x.parquet")
+            -> ("my-bucket", "teams/data-eng/uploads/t_acme/x.parquet")
+
+    Slashes are normalized so the key never doubles ``/``.
+    """
+    bucket, _, prefix = location.strip("/").partition("/")
+    segments = ([prefix.strip("/")] if prefix else []) + [p.strip("/") for p in parts if p]
+    return bucket, "/".join(segments)
+
+
 def presign_put(bucket: str, key: str, content_type: str = "application/octet-stream") -> str:
     s = _settings()
     return _client().generate_presigned_url(

@@ -137,6 +137,10 @@ def remember_dataset(
     tags: Annotated[
         list[str] | None, Field(description="Optional labels to organize and later filter datasets.")
     ] = None,
+    target: Annotated[
+        Literal["lakehouse", "scratch"],
+        Field(description="lakehouse = durable (default); scratch = fast, small, ephemeral (inline only)."),
+    ] = "lakehouse",
 ) -> dict:
     """Persist a table/dataframe into durable memory as a named dataset, so you and
     future turns or agents can query and build on it. This is how data ENTERS Memcove.
@@ -156,7 +160,9 @@ def remember_dataset(
     Example: remember_dataset(name="signups",
       source={"kind":"inline","format":"json_records","records":[{"day":"mon","n":12}]})
     """
-    return _dump(ingest_tool.ingest_object(_tenant(ctx), name, source, mode=mode, tags=tags))
+    return _dump(
+        ingest_tool.ingest_object(_tenant(ctx), name, source, mode=mode, tags=tags, target=target)
+    )
 
 
 @mcp.tool()
@@ -202,10 +208,18 @@ def derive_dataset(
     tags: Annotated[
         list[str] | None, Field(description="Optional labels to organize and later filter datasets.")
     ] = None,
+    target: Annotated[
+        Literal["lakehouse", "scratch"],
+        Field(description="lakehouse = durable, with lineage (default); scratch = fast, small, ephemeral."),
+    ] = "lakehouse",
 ) -> dict:
     """Create a NEW named dataset from a SQL SELECT over existing datasets and persist
     it — a join, rollup, or filtered view you want to keep and reuse. Lineage back to
     the source datasets is recorded automatically (visible via `inspect_dataset`).
+
+    Set `target="scratch"` to materialize into the fast, ephemeral scratchpad instead of
+    durable memory. Scratch datasets are addressed as `scratch.<name>` in later SQL and
+    can be JOINed with durable datasets in one `query_memory` call.
 
     Use this instead of `query_memory` when the result is worth keeping. Use
     `remember_dataset` instead when the data comes from OUTSIDE (inline/file/upload)
@@ -216,7 +230,9 @@ def derive_dataset(
       sql="SELECT u.id, sum(o.amount) AS revenue FROM users u "
           "JOIN orders o ON o.user_id = u.id GROUP BY u.id")
     """
-    return _dump(derive_tool.derive_object(_tenant(ctx), new_name, sql, mode=mode, tags=tags))
+    return _dump(
+        derive_tool.derive_object(_tenant(ctx), new_name, sql, mode=mode, tags=tags, target=target)
+    )
 
 
 @mcp.tool()

@@ -24,6 +24,10 @@ from memcove.core.errors import SqlGuardError
 
 _DIALECT = "trino"
 
+# Reserved SQL schema alias for the caller's own scratchpad, e.g. `FROM scratch.tmp`.
+# Resolved to the tenant's real scratch catalog + schema by validate_select.
+SCRATCH_ALIAS = "scratch"
+
 # Any of these appearing anywhere in the tree means the statement is not a pure read.
 _FORBIDDEN = (
     exp.Insert,
@@ -50,6 +54,7 @@ _DENY_SCHEMAS = frozenset(
 class GuardedQuery:
     sql: str  # validated + tenant-qualified SQL (Trino dialect)
     referenced_labels: list[str] = field(default_factory=list)
+    scratch_labels: list[str] = field(default_factory=list)  # refs via the scratch.<x> alias
 
 
 def _cte_names(tree: exp.Expression) -> set[str]:
@@ -63,15 +68,23 @@ def _cte_names(tree: exp.Expression) -> set[str]:
 
 
 def validate_select(
-    sql: str, tenant_ns: str, catalog: str, shared_schemas: list[str] | None = None
+    sql: str,
+    tenant_ns: str,
+    catalog: str,
+    shared_schemas: list[str] | None = None,
+    scratch_catalog: str | None = None,
+    scratch_schema: str | None = None,
 ) -> GuardedQuery:
     """Validate a read-only statement and resolve every table reference.
 
     Bare names and references to the caller's own schema are qualified to ``tenant_ns``;
     references to a schema in ``shared_schemas`` (the read-only reference plane) resolve
-    to themselves; every other namespace, foreign catalog, or metadata schema (e.g.
-    ``information_schema``, ``system``) is rejected. Comparison is case-folded, so a
-    quoted mixed-case identifier cannot smuggle in a foreign schema.
+    to themselves; the reserved alias ``scratch.<label>`` (when ``scratch_catalog`` is
+    supplied) resolves to the caller's scratchpad catalog + schema — so a scratch dataset
+    can be joined with lakehouse and reference tables in one query. Every other namespace,
+    foreign catalog, or metadata schema (e.g. ``information_schema``, ``system``) is
+    rejected. Comparison is case-folded, so a quoted mixed-case identifier cannot smuggle
+    in a foreign schema.
     """
     stripped = sql.strip().rstrip(";").strip()
     if not stripped:
@@ -103,6 +116,7 @@ def validate_select(
     tenant_lc = tenant_ns.lower()
     cat_lc = catalog.lower()
     referenced: list[str] = []
+    scratch_refs: list[str] = []
 
     for table in tree.find_all(exp.Table):
         name = (table.name or "").lower()
@@ -118,6 +132,17 @@ def validate_select(
         # empty-name exp.Table). If we can't prove it stays in-tenant, reject it.
         if not name:
             raise SqlGuardError("unsupported table expression in FROM clause")
+
+        # Reserved scratchpad alias: `scratch.<label>` -> the caller's own scratch
+        # catalog + schema (a DIFFERENT Trino catalog). Handled before the foreign-catalog
+        # check so the scratch catalog is reachable only through this alias, never named
+        # directly. Rejected (falls through to cross-namespace) when scratch is disabled.
+        if scratch_catalog and db == SCRATCH_ALIAS and not cat:
+            table.set("catalog", exp.to_identifier(scratch_catalog))
+            table.set("db", exp.to_identifier(scratch_schema))
+            if name not in scratch_refs:
+                scratch_refs.append(name)
+            continue
 
         # Foreign catalogs (system, jdbc, other Trino catalogs) are never permitted.
         if cat and cat != cat_lc:
@@ -145,7 +170,11 @@ def validate_select(
         if name and name not in referenced:
             referenced.append(name)
 
-    return GuardedQuery(sql=tree.sql(dialect=_DIALECT), referenced_labels=referenced)
+    return GuardedQuery(
+        sql=tree.sql(dialect=_DIALECT),
+        referenced_labels=referenced,
+        scratch_labels=scratch_refs,
+    )
 
 
 def wrap_preview(validated_sql: str, row_cap: int) -> str:

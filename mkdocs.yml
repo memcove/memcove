@@ -85,6 +85,7 @@ nav:
       - Architecture: concepts/architecture.md
       - Tenant isolation & the SQL guard: concepts/isolation.md
       - Security & trust boundary: concepts/security.md
+      - Scratchpad plane: concepts/scratchpad.md
   - MCP Tools:
       - Overview: tools/index.md
       - Storing data: tools/storing.md

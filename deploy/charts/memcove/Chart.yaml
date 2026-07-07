@@ -3,8 +3,8 @@ name: memcove
 description: Lakehouse-backed memory service for LLM agents, exposed over MCP
 type: application
 # Chart version is independent of the app version and bumps on chart changes.
-version: 0.2.0
-appVersion: "0.7.0"
+version: 0.3.0
+appVersion: "0.8.0"
 home: https://memcove.github.io/memcove/
 sources:
   - https://github.com/memcove/memcove

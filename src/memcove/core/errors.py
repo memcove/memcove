@@ -38,3 +38,7 @@ class TenancyError(MemcoveError):
 
 class TicketError(MemcoveError):
     """Raised when a Flight ticket/descriptor fails signature or expiry checks."""
+
+
+class ScratchError(MemcoveError):
+    """Raised for scratchpad-plane misconfiguration or unsupported operations."""

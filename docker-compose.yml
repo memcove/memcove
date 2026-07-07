@@ -63,9 +63,10 @@ services:
       CATALOG_S3_PATH__STYLE__ACCESS: "true"
 
   trino:
-    # Pinned (not :latest) for reproducible builds. Must be >= 431: derive's atomic
-    # replace uses the Iceberg connector's CREATE OR REPLACE TABLE, added in Trino 431.
-    image: trinodb/trino:431
+    # Pinned (not :latest) for reproducible builds. >= 480 for the bundled DuckDB
+    # connector (the scratchpad plane); also satisfies the >= 431 the Iceberg
+    # connector's CREATE OR REPLACE TABLE (derive's atomic replace) needs.
+    image: trinodb/trino:480
     container_name: memcove-trino
     ports:
       - "8080:8080"

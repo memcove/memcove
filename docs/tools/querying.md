@@ -1,6 +1,9 @@
 # Querying & deriving
 
-Ask questions of stored data with read-only SQL, and save results worth keeping.
+Ask questions of stored data with read-only SQL, and save results worth keeping. The SQL
+runs in **Trino over the lakehouse**, not in the agent — so joins and aggregations span
+datasets **far larger than any context window** (millions to billions of rows, across many
+tables) and only the small, capped result comes back to the model.
 
 ## `query_memory`
 

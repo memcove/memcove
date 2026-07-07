@@ -36,6 +36,11 @@ dependencies = [
 mysql = [
     "pymysql>=1.1.0",
 ]
+# Benchmark harness (benchmarks/finance_benchmark.py): real market data via yfinance.
+bench = [
+    "yfinance>=0.2.40",
+    "pandas>=2.0.0",
+]
 dev = [
     "pytest>=8.2.0",
     "pytest-asyncio>=0.23.0",

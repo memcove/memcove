@@ -1,33 +1,96 @@
 # Memcove
 
-A **lakehouse-backed memory service for LLM agents**, exposed over **MCP**.
+**Durable, queryable memory for LLM agents — so they can work with real datasets
+instead of stuffing everything into their context window.**
 
-Agents dump data into labeled **memory objects** (inline dataframe, an `s3://`
-parquet reference, or an out-of-band upload), ask the service to derive new
-objects with SQL (joins / aggregations / filters), and either read results back
-or get an **exported artifact** as a presigned URL. Objects are Iceberg tables
-in a Trino-backed catalog.
+## The problem
 
-## Architecture — two planes
+Agents are increasingly asked to work with **real data**: a few million rows of orders, a
+pile of parquet files, the result of a query. But an agent's only working memory is its
+**context window**, and that's a bad place to put data:
 
-- **Control plane = this MCP server.** Metadata, SQL/derivation, capped previews,
-  artifact URIs, presigned-upload handles. This is all the LLM touches.
-- **Data plane = S3 + Trino/Iceberg.** Bulk bytes never travel through MCP tool
-  responses; the model gets handles, previews, and presigned URLs instead.
+- **It doesn't scale.** Even a million-token context holds only a few megabytes of text —
+  real datasets dwarf that, and filling the window is slow, costly, and lossy.
+- **It doesn't persist.** Whatever's in the window is gone when the session ends or the
+  context is compacted.
+- **It can't compute.** Ask a model to sum a column or join two tables in its head and it
+  will quietly miscount, drop rows, and invent totals. LLMs reason; they don't aggregate.
 
-Write vs read split:
+So the moment an agent needs to *remember* a dataset or *actually compute* over one —
+*"join last quarter's orders with this month's returns and give me revenue by region"* —
+the context window is the wrong tool.
+
+## How people handle this today
+
+A few common workarounds, each with a real limit:
+
+- **Paste it into the prompt.** Fine for a handful of rows; falls apart at any real size —
+  token cost, truncation, and arithmetic the model can't be trusted to do.
+- **Vector search / RAG** (embeddings — mem0, Letta, a vector DB). The default "agent
+  memory," and great for *semantic recall over text* — but it can't answer a `GROUP BY`.
+  Retrieval returns approximate chunks, not exact aggregates; it's memory for documents,
+  not for tables.
+- **A code sandbox** (a Python/pandas REPL, e.g. a code interpreter). This computes
+  *correctly* — but the data has to fit in one process's RAM, the sandbox is ephemeral (no
+  memory across sessions), and there's no isolation across many agents or users.
+- **Raw SQL access to a warehouse.** Scales and computes — but handing an LLM a live
+  connection to Snowflake / BigQuery / Postgres is a liability: a prompt-injected `DELETE`,
+  a cross-tenant read, or an unbounded scan that runs up a bill. And every team rebuilds the
+  same plumbing.
+
+None of these is *durable, large-scale, correct, and agent-safe at the same time.*
+
+## Where Memcove fits
+
+Memcove is that missing layer — a memory service an agent talks to over
+[MCP](https://modelcontextprotocol.io), built so an LLM can safely store and compute over
+real datasets. The agent works with data **by name**; the data itself stays out of its
+context:
+
+1. **Remember** a dataset under a name — inline rows, an `s3://` parquet file, or a direct
+   upload.
+2. **Derive** new datasets with plain SQL — **joins and aggregations over datasets far too
+   big to fit in a prompt** (millions to billions of rows, across many tables) — which
+   Memcove runs in the lakehouse and records the lineage of.
+3. **Read back** only what's needed: a capped preview, or a download link for the full
+   result.
+
+It combines what those workarounds each only half-do:
+
+- **Durable**, like a warehouse — datasets persist across turns, sessions, and other agents.
+- **Large-scale and correct**, like the sandbox but unbounded — joins and aggregations run
+  in a distributed SQL engine over a lakehouse: exact, and not limited by RAM or context.
+- **Agent-safe by construction**, unlike raw warehouse access — a read-only SQL guard,
+  per-tenant isolation, capped previews, and no bulk bytes through the model.
+- **Structured**, where RAG is semantic — memory for *tables*, meant to sit *alongside* RAG,
+  not replace it.
+
+The data lives in a real lakehouse and never passes through the model's context; the agent
+only ever sees names, previews, and links.
+
+## How it works
+
+Two planes keep the bytes away from the model:
+
+- **Control plane = this MCP server.** Metadata, SQL/derivation, capped previews, artifact
+  URIs, presigned-upload handles. This is all the LLM touches.
+- **Data plane = S3 + Trino/Iceberg.** Bulk bytes never travel through MCP tool responses;
+  the model gets handles, previews, and presigned URLs instead.
+
+Datasets are Iceberg tables in a Trino-backed catalog. The write and read paths are split:
+
 - **PyIceberg + PyArrow** = the ingest/write path (`core/catalog.py`).
 - **Trino** = the read/derive/export path (`core/trino_client.py`).
 
 Isolation is **private per tenant** (`<tenant>.<label>` → Iceberg table
-`iceberg.<tenant_ns>.<label>`), enforced by the **SQL guard**
-(`core/sql_guard.py`): only read-only SELECTs, every table reference qualified to
-the caller's namespace, cross-namespace/catalog references rejected.
+`iceberg.<tenant_ns>.<label>`), enforced by the **SQL guard** (`core/sql_guard.py`): only
+read-only SELECTs, every table reference qualified to the caller's namespace,
+cross-namespace/catalog references rejected.
 
-> **Auth**: two models, both resolving to the tenant namespace through the single
-> `core/tenancy.py` seam — a **trusted-header / proxy** mode (default) and **native
-> OAuth 2.1**, where Memcove validates bearer JWTs itself so clients like Claude connect
-> directly. See the [auth docs](https://memcove.github.io/memcove/configuration/auth/).
+**Auth**: two models, both resolving to the tenant namespace through the single
+`core/tenancy.py` seam — a **trusted-header / proxy** mode (default) and **native OAuth
+2.1**, where Memcove validates bearer JWTs itself so clients like Claude connect directly.
+See the [auth docs](https://memcove.github.io/memcove/configuration/auth/).
 
 ## MCP tools
 

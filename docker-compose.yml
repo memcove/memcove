@@ -106,8 +106,10 @@ services:
       - pg-data:/var/lib/postgresql/data
 
   # Alternative registry backend, for exercising the MySQL path (the registry is
-  # pluggable: Postgres | SQLite | MySQL). Not used by the default stack wiring.
+  # pluggable: Postgres | SQLite | MySQL). Behind the `mysql` profile so the default
+  # `docker compose up` stays lean — start it with `docker compose --profile mysql up`.
   mysql:
+    profiles: ["mysql"]
     image: mysql:8
     container_name: memcove-mysql
     ports:

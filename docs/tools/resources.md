@@ -16,8 +16,9 @@ Metadata for a single dataset (schema, source, tags, lineage) — the same shape
 Lists all datasets for a tenant — `{datasets: [...]}`, the same shape as
 [`list_memory`](reading.md#list_memory).
 
-!!! note "Tenant in the URI"
-    Resources take the tenant from the URI path rather than from the request headers the
-    way tools do. Binding resource access to the authenticated caller is tracked as
-    hardening work; treat resources as convenience views and rely on tools for
-    tenant-scoped access in security-sensitive setups.
+!!! note "Tenant in the URI is enforced against the caller"
+    The `{tenant}` in the URI must match the **authenticated caller's** tenant. Memcove
+    resolves the caller's tenant (from the verified identity, exactly as tools do) and
+    rejects the request if the URI names a different tenant — so a caller cannot read
+    another tenant's metadata by naming it in the URI. Resources are tenant-scoped with the
+    same isolation guarantee as tools.

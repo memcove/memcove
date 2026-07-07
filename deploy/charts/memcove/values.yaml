@@ -4,7 +4,7 @@
 # (see `secrets.existingSecret`), not this file.
 
 image:
-  repository: andrzejgluszynski/memcove
+  repository: ghcr.io/memcove/memcove
   # Defaults to .Chart.appVersion when empty.
   tag: ""
   pullPolicy: IfNotPresent

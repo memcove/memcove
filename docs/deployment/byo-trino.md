@@ -30,7 +30,8 @@ written by an agent won't be queryable — that's the most common misconfigurati
 
 - **Trino ≥ 431.** `derive_dataset` with `mode=replace` uses `CREATE OR REPLACE TABLE` on
   the Iceberg connector for an atomic swap; that syntax needs Trino 431 or newer. The dev
-  stack pins 431. Older Trino will fail derivations.
+  stack pins 480 (which also satisfies the scratchpad's ≥ 480 requirement). Older Trino
+  will fail derivations.
 - **An Iceberg catalog** configured with the Iceberg connector, pointed at the *same* REST
   catalog and warehouse Memcove writes to. Its Trino catalog name must match
   `MEMCOVE_TRINO_CATALOG` (default `iceberg`).

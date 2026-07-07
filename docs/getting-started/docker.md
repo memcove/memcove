@@ -11,10 +11,10 @@ platform, a compose file, or a quick trial against your own infrastructure.
 | Docker Hub | `andrzejgluszynski/memcove` |
 | GHCR | `ghcr.io/memcove/memcove` |
 
-Tags track releases (`:0.7.0`, …) plus `:latest`. Pull either mirror:
+Tags track releases (e.g. `:0.9.0`) plus `:latest`. Pull either mirror:
 
 ```bash
-docker pull andrzejgluszynski/memcove:latest
+docker pull ghcr.io/memcove/memcove:latest
 ```
 
 ## Entry points
@@ -47,7 +47,7 @@ IAM role.
 
 ```bash
 docker run --rm -p 8090:8090 --env-file memcove.env \
-  andrzejgluszynski/memcove:latest
+  ghcr.io/memcove/memcove:latest
 ```
 
 The server initializes the registry on startup and serves MCP at
@@ -66,7 +66,7 @@ clients can dial, so set `MEMCOVE_FLIGHT_ADVERTISE_URI` to its reachable address
 ```bash
 docker run --rm -p 8815:8815 --env-file memcove.env \
   -e MEMCOVE_FLIGHT_ADVERTISE_URI=grpc://your-host:8815 \
-  andrzejgluszynski/memcove:latest memcove-flight
+  ghcr.io/memcove/memcove:latest memcove-flight
 ```
 
 ## Run the reconciler
@@ -75,7 +75,7 @@ A batch job — run it on a schedule (cron, a Kubernetes CronJob, etc.):
 
 ```bash
 docker run --rm --env-file memcove.env \
-  andrzejgluszynski/memcove:latest memcove-reconcile
+  ghcr.io/memcove/memcove:latest memcove-reconcile
 ```
 
 !!! warning "Don't expose Memcove directly"

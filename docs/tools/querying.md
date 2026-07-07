@@ -52,6 +52,7 @@ Use this instead of `query_memory` when the result is worth keeping. Use
 | `sql` | `str` | — | A read-only SELECT over existing datasets, referenced by bare name. |
 | `mode` | `"create"` \| `"replace"` | `"create"` | create = fail if it exists, replace = overwrite. |
 | `tags` | `list[str]` \| `null` | `null` | Optional labels to organize and later filter datasets. |
+| `target` | `"lakehouse"` \| `"scratch"` | `"lakehouse"` | Where to materialize the result — `scratch` uses the ephemeral [scratchpad plane](../concepts/scratchpad.md). |
 
 **Returns** — the new dataset's name, schema, row count, and lineage.
 

@@ -10,10 +10,15 @@ Arrow Flight data plane:
   Service: {{ include "memcove.fullname" . }}-flight:{{ .Values.flight.service.port }} (gRPC)
 {{- end }}
 
+{{- if .Values.config.oauth.enabled }}
+Auth: native OAuth 2.1 is ENABLED — Memcove validates bearer JWTs itself, so MCP clients
+  may connect directly. Still restrict who can reach it at the network layer{{ if not .Values.networkPolicy.enabled }} (networkPolicy is currently disabled){{ end }}.
+{{- else }}
 IMPORTANT — trust boundary:
   Memcove trusts a tenant identity in request headers set by an auth proxy; it does
   not validate tokens itself. Do NOT expose it directly. Put an authenticating proxy
   in front and{{ if not .Values.networkPolicy.enabled }} enable networkPolicy (currently disabled) to{{ end }} restrict ingress to that proxy.
+{{- end }}
 
 {{- if not .Values.secrets.existingSecret }}
 

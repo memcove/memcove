@@ -4,16 +4,22 @@
 instead of stuffing everything into their context window.**
 
 When an agent works with tabular data — a dataframe, a query result, millions of rows of
-logs — its only working memory is the context window: the data either gets pasted into the
-prompt (token-expensive, lossy, size-capped) or vanishes when the session ends.
+logs — its only working memory is the context window: too small for real data, gone when the
+session ends, and unable to compute (a model asked to sum a column or join two tables in its
+head miscounts and invents totals).
 
-Memcove gives the agent somewhere to put it. It **remembers** datasets by name, runs
-**joins and aggregations over data far too large to fit in a prompt** — millions to
-billions of rows, across many tables — with plain SQL, and hands back only what's needed: a
-capped preview, a downloadable file, or a live Arrow stream. The data lives in a real
-lakehouse and **never passes through the model's context**; the agent only ever sees names,
-previews, and links. Memory is durable across turns and other agents, and every tenant is
-isolated.
+That gap gets patched over today — pasting rows into the prompt, vector search (great for
+text, useless for a `GROUP BY`), an ephemeral code sandbox that resets between sessions, or
+handing the model raw SQL access to a warehouse (powerful, but a prompt-injected `DELETE` or
+cross-tenant read waiting to happen). None is durable, large-scale, correct, and agent-safe
+at once.
+
+Memcove is that missing layer. It **remembers** datasets by name, runs **joins and
+aggregations over data far too large to fit in a prompt** — millions to billions of rows,
+across many tables — with plain SQL, and hands back only what's needed: a capped preview, a
+downloadable file, or a live Arrow stream. The data lives in a real lakehouse and **never
+passes through the model's context**; the agent only ever sees names, previews, and links.
+Memory is durable across turns and other agents, and every tenant is isolated.
 
 It speaks the [Model Context Protocol (MCP)](https://modelcontextprotocol.io), so any
 MCP-capable agent can use it as a tool. Underneath, datasets are Apache Iceberg tables in an

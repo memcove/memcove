@@ -5,35 +5,68 @@ instead of stuffing everything into their context window.**
 
 ## The problem
 
-When an AI agent works with data — a spreadsheet you hand it, a query result, a few
-million rows of logs — it has nowhere good to keep it. Its only working memory is the
-context window, so the data either:
+Agents are increasingly asked to work with **real data**: a few million rows of orders, a
+pile of parquet files, the result of a query. But an agent's only working memory is its
+**context window**, and that's a bad place to put data:
 
-- gets pasted into the prompt (token-expensive, lossy, and capped at a few megabytes), or
-- disappears the moment the session ends.
+- **It doesn't scale.** Even a million-token context holds only a few megabytes of text —
+  real datasets dwarf that, and filling the window is slow, costly, and lossy.
+- **It doesn't persist.** Whatever's in the window is gone when the session ends or the
+  context is compacted.
+- **It can't compute.** Ask a model to sum a column or join two tables in its head and it
+  will quietly miscount, drop rows, and invent totals. LLMs reason; they don't aggregate.
 
-So a request like *"remember last quarter's orders, join them with this month's returns,
-and show me the top customers"* is either impossible (too big for the prompt) or has to be
-redone from scratch every session.
+So the moment an agent needs to *remember* a dataset or *actually compute* over one —
+*"join last quarter's orders with this month's returns and give me revenue by region"* —
+the context window is the wrong tool.
 
-## The solution
+## How people handle this today
 
-Memcove is a memory service an agent talks to over [MCP](https://modelcontextprotocol.io).
-The agent works with data **by name**, and the data itself stays out of its context:
+A few common workarounds, each with a real limit:
+
+- **Paste it into the prompt.** Fine for a handful of rows; falls apart at any real size —
+  token cost, truncation, and arithmetic the model can't be trusted to do.
+- **Vector search / RAG** (embeddings — mem0, Letta, a vector DB). The default "agent
+  memory," and great for *semantic recall over text* — but it can't answer a `GROUP BY`.
+  Retrieval returns approximate chunks, not exact aggregates; it's memory for documents,
+  not for tables.
+- **A code sandbox** (a Python/pandas REPL, e.g. a code interpreter). This computes
+  *correctly* — but the data has to fit in one process's RAM, the sandbox is ephemeral (no
+  memory across sessions), and there's no isolation across many agents or users.
+- **Raw SQL access to a warehouse.** Scales and computes — but handing an LLM a live
+  connection to Snowflake / BigQuery / Postgres is a liability: a prompt-injected `DELETE`,
+  a cross-tenant read, or an unbounded scan that runs up a bill. And every team rebuilds the
+  same plumbing.
+
+None of these is *durable, large-scale, correct, and agent-safe at the same time.*
+
+## Where Memcove fits
+
+Memcove is that missing layer — a memory service an agent talks to over
+[MCP](https://modelcontextprotocol.io), built so an LLM can safely store and compute over
+real datasets. The agent works with data **by name**; the data itself stays out of its
+context:
 
 1. **Remember** a dataset under a name — inline rows, an `s3://` parquet file, or a direct
    upload.
-2. **Derive** new datasets from it with plain SQL — **joins and aggregations over datasets
-   far too big to fit in a prompt** (millions to billions of rows, across many tables) —
-   which Memcove runs in the lakehouse and records the lineage of.
-3. **Read back** only what's needed: a small capped preview, or a download link for the
-   full result.
+2. **Derive** new datasets with plain SQL — **joins and aggregations over datasets far too
+   big to fit in a prompt** (millions to billions of rows, across many tables) — which
+   Memcove runs in the lakehouse and records the lineage of.
+3. **Read back** only what's needed: a capped preview, or a download link for the full
+   result.
 
-The data — gigabytes or more — lives in a real data lakehouse and **never passes through
-the model's context**. Because the heavy work (the joins, the group-bys, the rollups) runs
-in a distributed query engine over that lakehouse, the agent can crunch datasets orders of
-magnitude larger than its context window and still get back only a small summary. Memory is
-**durable across sessions**, and every agent (tenant) is **isolated** from the others.
+It combines what those workarounds each only half-do:
+
+- **Durable**, like a warehouse — datasets persist across turns, sessions, and other agents.
+- **Large-scale and correct**, like the sandbox but unbounded — joins and aggregations run
+  in a distributed SQL engine over a lakehouse: exact, and not limited by RAM or context.
+- **Agent-safe by construction**, unlike raw warehouse access — a read-only SQL guard,
+  per-tenant isolation, capped previews, and no bulk bytes through the model.
+- **Structured**, where RAG is semantic — memory for *tables*, meant to sit *alongside* RAG,
+  not replace it.
+
+The data lives in a real lakehouse and never passes through the model's context; the agent
+only ever sees names, previews, and links.
 
 ## How it works
 

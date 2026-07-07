@@ -4,6 +4,22 @@ All notable changes to Memcove are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 semantic versioning once it reaches 1.0.
 
+## [0.8.0] - 2026-07-07
+
+### Added
+- **Scratchpad plane** — an optional fast, small, **ephemeral** store backed by DuckDB
+  *behind Trino* as a federated catalog (`MEMCOVE_SCRATCH_ENABLED`, needs Trino ≥ 480).
+  `remember_dataset` and `derive_dataset` take `target="scratch"`, and a scratch dataset is
+  addressed in SQL via the reserved `scratch.<label>` alias — so it can be **JOINed with
+  durable lakehouse tables and the reference plane in one `query_memory` call**. The SQL
+  guard qualifies the alias to the caller's own scratch schema, so scratch is tenant-isolated
+  like everything else. Two operator-selected catalog modes (`MEMCOVE_SCRATCH_CATALOG_MODE`):
+  **shared** (one static DuckDB catalog, schema-per-tenant) and **per_tenant** (a
+  `scratch_<tenant>` catalog created via Trino dynamic catalog management, file-level
+  isolation). New `core/scratch.py`, `SourceKind.SCRATCH`, `MEMCOVE_SCRATCH_*` settings, and
+  a `scratch` DuckDB catalog + Trino 480 in the dev stack. Scratch datasets are not tracked
+  in the durable registry (no lineage); a TTL/session sweep lands with the session work.
+
 ## [0.7.0] - 2026-07-07
 
 ### Added

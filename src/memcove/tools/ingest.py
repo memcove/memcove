@@ -6,12 +6,57 @@ import uuid
 
 import pyarrow as pa
 
-from memcove.core import arrow_io, catalog, registry, storage
+from memcove.core import arrow_io, catalog, registry, scratch, storage
 from memcove.core.config import get_settings
-from memcove.core.errors import IngestError
+from memcove.core.errors import IngestError, ObjectExistsError
 from memcove.core.models import MemoryObject, SourceKind, UploadTicket
 from memcove.core.naming import validate_label
 from memcove.tools.objects import describe_object, pending_object
+
+
+def _trino_type(at: pa.DataType) -> str:
+    """Arrow type -> the Trino type to CAST a scratch column to."""
+    if pa.types.is_boolean(at):
+        return "BOOLEAN"
+    if pa.types.is_integer(at):
+        return "BIGINT"
+    if pa.types.is_floating(at):
+        return "DOUBLE"
+    if pa.types.is_timestamp(at):
+        return "TIMESTAMP"
+    if pa.types.is_date(at):
+        return "DATE"
+    return "VARCHAR"
+
+
+def _literal(v: object, at: pa.DataType) -> str:
+    """A Trino SQL literal for one cell; the enclosing CAST enforces the real type."""
+    if v is None:
+        return "NULL"
+    if pa.types.is_boolean(at):
+        return "true" if v else "false"
+    if pa.types.is_integer(at) or pa.types.is_floating(at):
+        return repr(v) if pa.types.is_floating(at) else str(int(v))
+    # dates/timestamps arrive as python date/datetime; str() gives an ISO form Trino casts.
+    return "'" + str(v).replace("'", "''") + "'"
+
+
+def _scratch_select(table: pa.Table) -> str:
+    """Build a typed SELECT (over a VALUES list) to CTAS an inline table into scratch."""
+    fields = list(table.schema)
+    cols = ", ".join(
+        f'CAST(c{i} AS {_trino_type(f.type)}) AS "{f.name}"' for i, f in enumerate(fields)
+    )
+    names = ", ".join(f"c{i}" for i in range(len(fields)))
+    if table.num_rows == 0:
+        # No rows -> a zero-row, correctly-typed shell (VALUES needs >= 1 row).
+        nulls = ", ".join("NULL" for _ in fields)
+        return f"SELECT {cols} FROM (VALUES ({nulls})) AS _v({names}) WHERE false"
+    rows = []
+    for row in table.to_pylist():
+        vals = ", ".join(_literal(row[f.name], f.type) for f in fields)
+        rows.append(f"({vals})")
+    return f"SELECT {cols} FROM (VALUES {', '.join(rows)}) AS _v({names})"
 
 
 def _check_s3_ingest_allowed(uri: str, settings) -> None:
@@ -85,10 +130,21 @@ def ingest_object(
     source: dict,
     mode: str = "create",
     tags: list[str] | None = None,
+    target: str = "lakehouse",
 ) -> MemoryObject:
-    """Ingest data into a labeled Iceberg object via the PyIceberg write path."""
+    """Ingest data into a labeled object.
+
+    ``target='lakehouse'`` (default) writes a durable Iceberg table via PyIceberg.
+    ``target='scratch'`` writes into the ephemeral DuckDB scratchpad (via Trino) — inline
+    sources only, since scratch is for small, fast, throwaway data.
+    """
     label = validate_label(label)
+    if target not in ("lakehouse", "scratch"):
+        raise ValueError(f"unknown target {target!r}; expected lakehouse|scratch")
     table, kind, ref = _table_from_source(source, tenant)
+
+    if target == "scratch":
+        return _ingest_to_scratch(tenant, label, table, kind, mode)
 
     catalog.write_arrow(tenant, label, table, mode=mode)
     ok = registry.record_object_guarded(
@@ -105,6 +161,27 @@ def ingest_object(
         # already logged and the reconciler / read-repair will backfill).
         return pending_object(tenant, label, source=kind, source_ref=ref, tags=tags or [])
     return describe_object(tenant, label)
+
+
+def _ingest_to_scratch(
+    tenant: str, label: str, table: pa.Table, kind: SourceKind, mode: str
+) -> MemoryObject:
+    """Write a small inline table into the DuckDB scratchpad via a Trino VALUES CTAS."""
+    if kind is not SourceKind.INLINE:
+        raise IngestError(
+            "scratch ingest supports inline sources only; use target=lakehouse for "
+            "s3_parquet / upload_handle, or derive into scratch from a query"
+        )
+    if mode not in ("create", "replace"):
+        raise IngestError(
+            f"scratch ingest supports mode create|replace only, not {mode!r}"
+        )
+    if mode == "create" and scratch.table_exists(tenant, label):
+        raise ObjectExistsError(f"scratch object '{label}' already exists (use mode=replace)")
+    scratch.create_as_select(
+        tenant, label, _scratch_select(table), replace=(mode == "replace")
+    )
+    return scratch.describe(tenant, label)
 
 
 def request_upload(tenant: str, label: str) -> UploadTicket:

@@ -131,6 +131,14 @@ config:
   # Read-only shared reference schemas (JSON list).
   sharedSchemas:
     - ref_market
+  # Scratchpad plane (DuckDB behind Trino; needs Trino >= 480 + a DuckDB catalog).
+  # See docs/concepts/scratchpad.md for the mode trade-offs.
+  scratch:
+    enabled: false
+    catalogMode: shared # shared | per_tenant
+    catalog: scratch # catalog name in shared mode
+    catalogPrefix: scratch # per_tenant: catalog is <prefix>_<tenant>
+    duckdbDir: /data/scratch # per_tenant: Trino-side dir for <tenant>.duckdb files
   # Empty list = agent s3_parquet ingest disabled (fail closed).
   allowedS3IngestPrefixes: []
   # Extra raw MEMCOVE_* env (escape hatch for settings not surfaced above).

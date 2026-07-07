@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from memcove.core import catalog, registry, trino_client
+from memcove.core import catalog, registry, scratch, trino_client
 from memcove.core.audit import audit
 from memcove.core.config import get_settings
 from memcove.core.errors import ObjectExistsError, SchemaMismatchError
@@ -35,12 +35,25 @@ def _assert_replace_keeps_shape(tenant: str, new_label: str, select_sql: str) ->
         )
 
 
+def _derive_to_scratch(tenant: str, new_label: str, guard, mode: str) -> MemoryObject:
+    """CTAS into the DuckDB scratchpad. Ephemeral, not tracked in the durable registry."""
+    exists = scratch.table_exists(tenant, new_label)
+    if mode == "create" and exists:
+        raise ObjectExistsError(
+            f"scratch object '{new_label}' already exists (use mode=replace)"
+        )
+    scratch.create_as_select(tenant, new_label, guard.sql, replace=(mode == "replace"))
+    audit("derive", tenant=tenant, target=new_label, mode=mode, sql=guard.sql, store="scratch")
+    return scratch.describe(tenant, new_label)
+
+
 def derive_object(
     tenant: str,
     new_label: str,
     sql: str,
     mode: str = "create",
     tags: list[str] | None = None,
+    target: str = "lakehouse",
 ) -> MemoryObject:
     """Materialize ``<tenant>.<new_label>`` from a validated SELECT (CTAS).
 
@@ -48,15 +61,26 @@ def derive_object(
     ``replace`` uses ``CREATE OR REPLACE TABLE`` (Iceberg connector, Trino server
     431+): an atomic swap with no drop window, so a concurrent reader always sees a
     valid table version.
+
+    ``target='scratch'`` materializes into the ephemeral DuckDB scratchpad instead of the
+    durable lakehouse. The SELECT can read lakehouse + reference + scratch, so a scratch
+    dataset is a fast, joinable derivation of big tables.
     """
     new_label = validate_label(new_label)
     if mode not in ("create", "replace"):
         raise ValueError(f"unknown mode {mode!r}; expected create|replace")
+    if target not in ("lakehouse", "scratch"):
+        raise ValueError(f"unknown target {target!r}; expected lakehouse|scratch")
     settings = get_settings()
+    scratch_cat, scratch_schema = scratch.guard_params(tenant)
     guard = validate_select(
         sql, tenant_ns=tenant, catalog=settings.trino_catalog,
         shared_schemas=settings.shared_schemas,
+        scratch_catalog=scratch_cat, scratch_schema=scratch_schema,
     )
+
+    if target == "scratch":
+        return _derive_to_scratch(tenant, new_label, guard, mode)
 
     exists = catalog.table_exists(tenant, new_label)
     if mode == "create" and exists:

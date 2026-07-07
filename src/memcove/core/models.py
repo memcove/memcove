@@ -17,6 +17,10 @@ class SourceKind(str, Enum):
     UPLOAD = "upload_handle"
     STREAM = "stream"
     DERIVED = "derived"
+    # A dataset in the ephemeral DuckDB-behind-Trino scratchpad plane (not the durable
+    # lakehouse). Created via target=scratch on remember/derive; not tracked in the
+    # durable registry.
+    SCRATCH = "scratch"
     # A row the reconciler (or synchronous read-repair) backfilled for an Iceberg
     # table that had no registry row — e.g. after a crash between the data write and
     # the registry write. Marks that user metadata (tags/producing_sql/lineage) was

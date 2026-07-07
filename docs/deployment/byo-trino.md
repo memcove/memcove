@@ -80,6 +80,23 @@ s3.region=us-east-1
 | Object store endpoint, region, path-style, credentials | Iceberg **REST** catalog type (other catalog types not wired) |
 | Warehouse / staging / artifacts buckets | Write = PyIceberg, read = Trino |
 
+## Optional: the scratchpad (DuckDB behind Trino)
+
+If you enable the [scratchpad plane](../concepts/scratchpad.md)
+(`MEMCOVE_SCRATCH_ENABLED=true`), Trino needs a bit more:
+
+- **Trino ≥ 480** for the bundled DuckDB connector.
+- A **DuckDB catalog** Trino can reach. In `shared` mode you provide a static catalog
+  (e.g. `scratch.properties` with `connector.name=duckdb`); in `per_tenant` mode you must
+  enable **dynamic catalog management** (`catalog.management=dynamic`) and grant the
+  service principal CREATE/DROP CATALOG.
+- The DuckDB file(s) on storage **every Trino node can reach** (a shared volume), since
+  DuckDB is an embedded, single-writer, single-file engine.
+
+Scratch is entirely optional and off by default — the lakehouse/reference story above
+doesn't require any of it. See the [scratchpad concepts page](../concepts/scratchpad.md)
+for the mode trade-offs.
+
 ## Defense in depth: impersonation
 
 By default Memcove connects to Trino as one service principal and relies on its

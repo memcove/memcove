@@ -54,6 +54,17 @@ data:
   {{- end }}
   {{- end }}
 
+  # Scratchpad plane
+  {{- with .Values.config.scratch }}
+  MEMCOVE_SCRATCH_ENABLED: {{ .enabled | quote }}
+  {{- if .enabled }}
+  MEMCOVE_SCRATCH_CATALOG_MODE: {{ .catalogMode | quote }}
+  MEMCOVE_SCRATCH_CATALOG: {{ .catalog | quote }}
+  MEMCOVE_SCRATCH_CATALOG_PREFIX: {{ .catalogPrefix | quote }}
+  MEMCOVE_SCRATCH_DUCKDB_DIR: {{ .duckdbDir | quote }}
+  {{- end }}
+  {{- end }}
+
   # JSON-typed settings (pydantic parses these as JSON).
   MEMCOVE_SHARED_SCHEMAS: {{ .Values.config.sharedSchemas | toJson | quote }}
   MEMCOVE_ALLOWED_S3_INGEST_PREFIXES: {{ .Values.config.allowedS3IngestPrefixes | toJson | quote }}

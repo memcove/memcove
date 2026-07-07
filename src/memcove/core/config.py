@@ -136,6 +136,25 @@ class Settings(BaseSettings):
     # SQL guard; they resolve to themselves. Per-domain schemas contain blast radius.
     shared_schemas: list[str] = ["ref_market"]
 
+    # Scratchpad plane (M6): a fast, small, ephemeral store backed by DuckDB *behind
+    # Trino* as a federated catalog, so scratch datasets JOIN with lakehouse + reference
+    # tables in one Trino query. Off by default. Agents address it via the reserved
+    # `scratch.<label>` alias in SQL and `target=scratch` on remember/derive.
+    scratch_enabled: bool = False
+    # "shared"     — one static `scratch` DuckDB catalog the operator configures in Trino;
+    #                tenants are isolated by schema (schema-per-tenant) + the SQL guard.
+    #                Simplest; single-writer file shared across tenants (write contention).
+    # "per_tenant" — Memcove creates a `scratch_<tenant>` catalog per tenant at runtime via
+    #                Trino dynamic catalog management (needs `catalog.management=dynamic`),
+    #                each backed by its own DuckDB file. File-level isolation, no cross-
+    #                tenant write contention; heavier Trino setup. See docs.
+    scratch_catalog_mode: str = "shared"
+    scratch_catalog: str = "scratch"  # catalog name in "shared" mode
+    scratch_catalog_prefix: str = "scratch"  # "per_tenant": catalog is <prefix>_<tenant>
+    # "per_tenant" only: directory (on a volume reachable by every Trino node) where the
+    # per-tenant `<tenant>.duckdb` files live; used to build the CREATE CATALOG conn URL.
+    scratch_duckdb_dir: str = "/data/scratch"
+
     # Ingest allowlist: agent-supplied `s3_parquet` URIs must start with one of these
     # prefixes. Empty list = agent s3_parquet ingest is DISABLED (fail closed) to avoid
     # a confused-deputy read of any bucket the service credential can reach.

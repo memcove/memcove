@@ -82,11 +82,13 @@ The defaults target the local Docker stack, so local development needs no change
 
 | Setting | Type | Default | Notes |
 | --- | --- | --- | --- |
-| `MEMCOVE_TENANT_HEADER` | str | `x-memcove-tenant` | direct-mode tenant header |
+| `MEMCOVE_TENANT_MODE` | str | `auto` | how a caller becomes a tenant: `auto` / `shared` / `private` / `mapped` (see [tenancy modes](auth.md#how-the-tenant-is-resolved)) |
+| `MEMCOVE_TENANT_HEADER` | str | `x-memcove-tenant` | `auto` dev path: client-settable tenant header |
 | `MEMCOVE_DEFAULT_TENANT` | str | `default` | fallback when the header is absent |
-| `MEMCOVE_TENANT_SUBJECT_HEADER` | str | `""` | e.g. `x-auth-subject`; enables the fail-closed provisioning map |
+| `MEMCOVE_SHARED_TENANT` | str | `""` | `shared` mode target; empty falls back to `DEFAULT_TENANT` |
+| `MEMCOVE_TENANT_SUBJECT_HEADER` | str | `""` | e.g. `x-auth-subject`; the trusted identity for `mapped` / `private` on the proxy path |
 | `MEMCOVE_TENANT_GROUP_HEADER` | str | `""` | e.g. `x-auth-groups` (comma-separated) |
-| `MEMCOVE_TENANT_MAP` | dict | `{}` | subject/group → internal tenant id |
+| `MEMCOVE_TENANT_MAP` | dict | `{}` | `mapped` mode: subject/group → internal tenant id |
 
 See [Authentication & tenancy](auth.md) for how these interact.
 

@@ -61,6 +61,7 @@ Changelog = "https://github.com/memcove/memcove/blob/main/CHANGELOG.md"
 memcove-server = "memcove.server:main"
 memcove-flight = "memcove.data_plane.flight_server:main"
 memcove-reconcile = "memcove.reconciler:main"
+memcove-bench = "memcove.benchmarks.finance:main"  # needs the `bench` extra (yfinance, pandas)
 
 [build-system]
 requires = ["hatchling"]

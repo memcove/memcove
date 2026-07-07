@@ -8,17 +8,23 @@ engine (Trino + Iceberg + the registry) from the MCP transport.
 
 ## Run
 
+The harness is the `memcove-bench` console command (from `memcove.benchmarks.finance`):
+
 ```bash
 docker compose up -d --wait          # Memcove stack (Trino, Iceberg, MinIO, Postgres)
 uv sync --extra bench                # yfinance + pandas
-uv run python benchmarks/finance_benchmark.py --years 8 --replicate 4
+uv run memcove-bench --years 8 --replicate 4
 
 # bigger, with the heavy O(n²) correlation step:
-uv run python benchmarks/finance_benchmark.py --years 10 --replicate 10 --heavy-corr
+uv run memcove-bench --years 10 --replicate 10 --heavy-corr
 
 # offline (deterministic geometric-Brownian-motion data, no network):
-uv run python benchmarks/finance_benchmark.py --synthetic
+uv run memcove-bench --synthetic
 ```
+
+Outside the repo (after `pip install memcove[bench]`) it's just `memcove-bench …`.
+Price cache + result JSON are written under `./benchmark-output/` (override with
+`--out-dir`).
 
 | Flag | Default | Effect |
 | --- | --- | --- |
@@ -29,8 +35,8 @@ uv run python benchmarks/finance_benchmark.py --synthetic
 | `--tickers` | — | comma list to override the ~44-name universe |
 | `--tenant` | `bench` | tenant namespace to build into (reset at start) |
 
-Real prices are cached under `benchmarks/.cache/`; per-run metrics land in
-`benchmarks/results/*.json` (both gitignored).
+Real prices are cached under `benchmark-output/cache/`; per-run metrics land in
+`benchmark-output/results/*.json` (the whole dir is gitignored; change with `--out-dir`).
 
 ## The workload
 

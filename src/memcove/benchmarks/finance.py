@@ -15,10 +15,10 @@ universe), and `--heavy-corr`.
 Run (stack must be up: `docker compose up -d --wait`):
 
     uv sync --extra bench
-    uv run python benchmarks/finance_benchmark.py --years 8 --replicate 4
+    uv run memcove-bench --years 8 --replicate 4
 
     # bigger:
-    uv run python benchmarks/finance_benchmark.py --years 10 --replicate 10 --heavy-corr
+    uv run memcove-bench --years 10 --replicate 10 --heavy-corr
 """
 
 from __future__ import annotations
@@ -210,15 +210,15 @@ class Bench:
 
 # ------------------------------------------------------------------ data loading
 
-def _cache_path(key: str) -> Path:
-    d = Path(__file__).parent / ".cache"
-    d.mkdir(exist_ok=True)
+def _cache_path(out_dir: Path, key: str) -> Path:
+    d = out_dir / "cache"
+    d.mkdir(parents=True, exist_ok=True)
     return d / f"{key}.parquet"
 
 
-def fetch_prices(tickers: list[str], years: int, synthetic: bool) -> "pa.Table":
+def fetch_prices(tickers: list[str], years: int, synthetic: bool, out_dir: Path) -> "pa.Table":
     """Real daily OHLCV from yfinance (cached), or a deterministic GBM fallback."""
-    cache = _cache_path(f"prices_{years}y_{len(tickers)}")
+    cache = _cache_path(out_dir, f"prices_{years}y_{len(tickers)}")
     if cache.exists():
         print(f"  (loaded cached prices: {cache.name})")
         return pq.read_table(cache)
@@ -370,8 +370,11 @@ def main() -> None:
     ap.add_argument("--synthetic", action="store_true", help="skip yfinance, use GBM data")
     ap.add_argument("--heavy-corr", action="store_true", help="run the O(n^2) correlation step")
     ap.add_argument("--tickers", default="", help="comma list to override the universe")
+    ap.add_argument("--out-dir", default="benchmark-output",
+                    help="where price cache + result JSON are written (default: ./benchmark-output)")
     args = ap.parse_args()
 
+    out_dir = Path(args.out_dir)
     tenant = normalize_tenant(args.tenant)
     tickers = [t.strip().upper() for t in args.tickers.split(",") if t.strip()] or list(UNIVERSE)
     bench = Bench()
@@ -380,7 +383,7 @@ def main() -> None:
           f"tickers={len(tickers)}  years={args.years}  replicate={args.replicate}\n")
 
     # 1. Load market data (real or synthetic) and scale the universe.
-    prices = fetch_prices(tickers, args.years, args.synthetic)
+    prices = fetch_prices(tickers, args.years, args.synthetic, out_dir)
     prices, securities = replicate_universe(prices, args.replicate)
     n_tickers = len({*securities})
     print(f"  dataset: {prices.num_rows:,} price rows across {n_tickers} tickers, "
@@ -430,10 +433,10 @@ def main() -> None:
                  f"{ref.size_bytes / 1e6:.1f} MB -> {ref.uri}")
 
     # 6. Summary.
-    _summary(bench, tenant, n_tickers, args)
+    _summary(bench, tenant, n_tickers, args, out_dir)
 
 
-def _summary(bench: Bench, tenant: str, n_tickers: int, args) -> None:
+def _summary(bench: Bench, tenant: str, n_tickers: int, args, out_dir: Path) -> None:
     total = sum(p.seconds for p in bench.phases)
     ingest_rows = sum(p.rows for p in bench.phases if p.kind == "ingest")
     derive_rows = sum(p.rows for p in bench.phases if p.kind == "derive")
@@ -446,8 +449,8 @@ def _summary(bench: Bench, tenant: str, n_tickers: int, args) -> None:
     slowest = sorted(bench.phases, key=lambda p: p.seconds, reverse=True)[:3]
     print("  slowest phases  : " + ", ".join(f"{p.name} ({p.seconds:.1f}s)" for p in slowest))
 
-    out = Path(__file__).parent / "results"
-    out.mkdir(exist_ok=True)
+    out = out_dir / "results"
+    out.mkdir(parents=True, exist_ok=True)
     result = {
         "tenant": tenant, "tickers": n_tickers, "years": args.years,
         "replicate": args.replicate, "heavy_corr": args.heavy_corr,

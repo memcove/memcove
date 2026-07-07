@@ -1,0 +1,108 @@
+{
+  "tenant": "t_benchsmoke",
+  "tickers": 44,
+  "years": 2,
+  "replicate": 0,
+  "heavy_corr": false,
+  "total_seconds": 5.699,
+  "phases": [
+    {
+      "name": "prices",
+      "kind": "ingest",
+      "rows": 22176,
+      "seconds": 0.569291207997594,
+      "detail": ""
+    },
+    {
+      "name": "securities",
+      "kind": "ingest",
+      "rows": 44,
+      "seconds": 0.16403404199809302,
+      "detail": ""
+    },
+    {
+      "name": "daily_returns",
+      "kind": "derive",
+      "rows": 22176,
+      "seconds": 0.624599250004394,
+      "detail": "H1 close-to-close returns (LAG window per ticker)"
+    },
+    {
+      "name": "rolling_vol",
+      "kind": "derive",
+      "rows": 22132,
+      "seconds": 0.5068798339925706,
+      "detail": "H2 21-day rolling volatility (STDDEV window)"
+    },
+    {
+      "name": "rolling_ma",
+      "kind": "derive",
+      "rows": 22176,
+      "seconds": 0.48333712499879766,
+      "detail": "H3 20/50/200-day moving averages (AVG windows)"
+    },
+    {
+      "name": "returns_by_sector",
+      "kind": "derive",
+      "rows": 4024,
+      "seconds": 0.5786436249909457,
+      "detail": "H4 avg daily return per sector (JOIN securities + GROUP BY)"
+    },
+    {
+      "name": "sector_vol_monthly",
+      "kind": "derive",
+      "rows": 192,
+      "seconds": 0.6657422499993118,
+      "detail": "H5 monthly avg volatility per sector (JOIN + date_trunc + GROUP BY)"
+    },
+    {
+      "name": "monthly_perf",
+      "kind": "derive",
+      "rows": 1056,
+      "seconds": 0.42799275000288617,
+      "detail": "H6 monthly return per ticker (MIN_BY/MAX_BY aggregates)"
+    },
+    {
+      "name": "top_movers",
+      "kind": "derive",
+      "rows": 240,
+      "seconds": 0.292345750000095,
+      "detail": "H7 top-10 monthly movers (RANK window)"
+    },
+    {
+      "name": "signal",
+      "kind": "derive",
+      "rows": 22088,
+      "seconds": 0.7422995000088122,
+      "detail": "H9 composite trend/risk/momentum signal (5-way JOIN, deep lineage)"
+    },
+    {
+      "name": "latest_leaderboard",
+      "kind": "query",
+      "rows": 20,
+      "seconds": 0.12530687500839122,
+      "detail": ""
+    },
+    {
+      "name": "sector_scores",
+      "kind": "query",
+      "rows": 8,
+      "seconds": 0.08028266599285416,
+      "detail": ""
+    },
+    {
+      "name": "recent_top_movers",
+      "kind": "query",
+      "rows": 10,
+      "seconds": 0.1282952499896055,
+      "detail": ""
+    },
+    {
+      "name": "signal.parquet",
+      "kind": "export",
+      "rows": 22088,
+      "seconds": 0.3101776250114199,
+      "detail": "0.7 MB -> s3://memcove-artifacts/exports/t_benchsmoke/signal-1d4fa2f51b5649d3ae2275c5bbc87b9e.parquet"
+    }
+  ]
+}

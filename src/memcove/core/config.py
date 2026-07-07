@@ -34,6 +34,11 @@ class Settings(BaseSettings):
     s3_secret_key: str | None = "minio12345"
     s3_path_style: bool = True
     warehouse_bucket: str = "warehouse"
+    # staging_bucket / artifacts_bucket accept either a bare bucket ("my-bucket") or a
+    # bucket with a sub-path ("my-bucket/teams/data-eng"), so a team can scope Memcove's
+    # uploads/exports to a prefix it owns instead of the bucket root. The path is split
+    # into (bucket, key-prefix) internally — see storage.resolve(). The Iceberg warehouse
+    # is set separately via iceberg_warehouse.
     staging_bucket: str = "memcove-staging"
     artifacts_bucket: str = "memcove-artifacts"
 

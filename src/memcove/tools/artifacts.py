@@ -44,8 +44,9 @@ def export_artifact(
     capped = f"SELECT * FROM (\n{guard.sql}\n) AS _e LIMIT {settings.export_row_cap}"
     table = trino_client.execute_arrow(capped, run_as=tenant)
 
-    key = f"exports/{tenant}/{base}-{uuid.uuid4().hex}.{_EXT[fmt]}"
-    bucket = settings.artifacts_bucket
+    bucket, key = storage.resolve(
+        settings.artifacts_bucket, "exports", tenant, f"{base}-{uuid.uuid4().hex}.{_EXT[fmt]}"
+    )
 
     if fmt == "parquet":
         size = storage.write_parquet_table(table, bucket, key)

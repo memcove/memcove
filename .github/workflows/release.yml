@@ -104,6 +104,12 @@ jobs:
         run: uv build
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # Idempotent re-runs: if this version's files are already on PyPI
+          # (a re-tag or workflow_dispatch re-release), skip them instead of
+          # failing with "400 File already exists". Bump the version to ship
+          # anything new — published versions are immutable.
+          skip-existing: true
 
   helm:
     runs-on: ubuntu-latest

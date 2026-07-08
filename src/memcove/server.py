@@ -35,25 +35,48 @@ from memcove.tools import query as query_tool
 logger = logging.getLogger("memcove")
 
 INSTRUCTIONS = """\
-Memcove is your persistent, queryable data memory. Use it to store tabular data —
-dataframes, query results, uploaded files — as named datasets that survive across
-turns and agents, then compute over them with SQL instead of holding data in the
-conversation.
+Memcove is your cross-source join engine and persistent data memory. When two
+tools or sources can't see each other, land both here as named datasets and join
+them in one SQL query. Datasets survive across turns and agents, so you compute
+over stored tables with SQL instead of holding data in the conversation.
 
-Typical flow:
-  1. remember_dataset (or start_large_upload -> remember_dataset) to store data
-  2. query_memory to explore it with SQL
-  3. derive_dataset to save computed tables (joins/rollups) with lineage
-  4. export_dataset to hand the user a downloadable file
-Use list_memory / inspect_dataset to discover and audit what's already stored.
+Reach for Memcove when:
+  • you must JOIN or AGGREGATE across sources that can't query each other
+  • one tool's output has to be matched against another tool's output
+  • a result is worth reusing across turns/agents (don't re-fetch or re-paste it)
+For a value you need only once, compute it and move on — don't persist it.
 
-For very large data, use the streaming data plane instead of inline payloads:
-open_ingest_stream to stream rows IN, stream_dataset to stream a big result OUT
-(both hand back an Arrow Flight endpoint; the bytes bypass this channel).
+Discover first (safe opening move; also confirms the backend is reachable):
+  1. list_memory — what datasets do you already have? (avoids re-ingesting)
+  2. discover_reference_data — the source may already live in shared reference
+     data (e.g. ref_market.*), so you can join it without shuttling anything in
+Then bring in what's missing and compute:
+  3. remember_dataset — land external data as a named dataset (recipe below)
+  4. query_memory — join / filter / aggregate across all of them with SQL
+  5. derive_dataset — save a computed join/rollup, with lineage, to reuse
+  6. export_dataset — hand the user a downloadable file
 
-Reference datasets by their bare name in SQL, e.g. `SELECT * FROM my_dataset`.
-Datasets are private to you. Prefer storing data in Memcove over pasting large
-tables into the conversation."""
+Getting a source IN (the bridge):
+  • small (within the inline cap): remember_dataset(source={"kind":"inline",...})
+  • large extract: have the source UNLOAD/export parquet to S3, then
+    remember_dataset(source={"kind":"s3_parquet","uri":"s3://…"})
+  • a parquet file in hand: start_large_upload -> PUT the file ->
+    remember_dataset(source={"kind":"upload_handle",...})
+  • huge / continuous: open_ingest_stream (Arrow Flight; bytes bypass this channel)
+
+Prerequisites & limits: durable writes need server-side S3 credentials; inline
+payloads are size-capped (go S3/upload above it); s3_parquet ingest works only
+for operator-allowlisted buckets; the fast scratch plane (target="scratch") is
+off unless the operator enabled it; reference schemas are read-only.
+
+If a write fails: a credential/access error is the server-side S3 backend, not
+your call — fall back to target="scratch" or a smaller inline payload. If every
+write path fails, tell the user Memcove is unavailable and finish the task another
+way rather than retrying blindly.
+
+Reference your datasets by bare name (`SELECT * FROM my_dataset`) and reference-
+plane tables by qualified name (`ref_market.prices`). Your datasets are private
+to you. Prefer joining in Memcove over pasting large tables into the conversation."""
 
 settings = get_settings()
 
@@ -142,8 +165,9 @@ def remember_dataset(
         Field(description="lakehouse = durable (default); scratch = fast, small, ephemeral (inline only)."),
     ] = "lakehouse",
 ) -> dict:
-    """Persist a table/dataframe into durable memory as a named dataset, so you and
-    future turns or agents can query and build on it. This is how data ENTERS Memcove.
+    """Persist a table/dataframe into durable memory as a named dataset — how a
+    source ENTERS the join fabric, so you and future turns or agents can query it
+    and JOIN it against other landed datasets.
 
     Use this the moment you produce or receive data worth keeping (a dataframe you
     built, query results you'll reuse, an uploaded file). For a result you only need
@@ -155,6 +179,14 @@ def remember_dataset(
       • {"kind":"inline","format":"arrow_ipc_b64","data":"<base64 Arrow IPC>"}
       • {"kind":"s3_parquet","uri":"s3://bucket/path.parquet"}             reference existing parquet
       • {"kind":"upload_handle","handle":"<from start_large_upload>"}       after a large upload
+
+    Limits: `inline` payloads are size-capped — above the cap, have the source
+    export parquet to S3 and use `s3_parquet`, or `start_large_upload` +
+    `upload_handle`. `s3_parquet` only reads operator-allowlisted bucket prefixes
+    (disabled otherwise). `target="scratch"` is the fast ephemeral plane — it takes
+    inline sources only and must be enabled by the operator; a credential/access
+    error on a durable write is the server-side S3 backend, so retrying inline or
+    scratch is the fallback, not repeating the same call.
 
     Returns the stored dataset's name, schema, and row count.
     Example: remember_dataset(name="signups",
@@ -179,6 +211,11 @@ def query_memory(
     """Run a read-only SQL SELECT over your datasets and get a preview of the rows
     back (capped). This is the main way to ASK QUESTIONS of stored data — filters,
     joins, aggregations, anything SELECT.
+
+    This is where cross-source joins happen: reference every landed dataset by its
+    bare name and JOIN them in one SELECT, even if the sources they came from could
+    never query each other. Shared reference tables join in by qualified name too
+    (e.g. `ref_market.prices`).
 
     Reference datasets by their bare name, e.g.
     `SELECT region, count(*) FROM signups GROUP BY region`.
@@ -291,8 +328,10 @@ def discover_reference_data(ctx: Context) -> dict:
 
     Beyond your own private datasets, Memcove may expose shared reference data
     (e.g. market/reference tables) that anyone can query but no one can modify.
-    Use this to see which shared schemas and tables exist and their columns, then
-    read them in SQL by their qualified name, e.g. `SELECT * FROM ref_market.prices`.
+    Check here before ingesting: a source you were about to shuttle in may already
+    live here read-only, ready to JOIN — no bridging needed. Use this to see which
+    shared schemas and tables exist and their columns, then read them in SQL by
+    their qualified name, e.g. `SELECT * FROM ref_market.prices`.
 
     Returns {schemas: [{schema, tables: [{name, columns: [{name, type}]}]}]}.
     """

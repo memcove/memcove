@@ -104,6 +104,17 @@ class Settings(BaseSettings):
     inline_bytes_cap: int = 8 * 1024 * 1024
     export_row_cap: int = 5_000_000
     presign_ttl_seconds: int = 3600
+    # Largest S3/uploaded parquet object the s3_parquet / upload_handle ingest paths
+    # will read. Those paths buffer the whole object into the pod before writing, so
+    # this bounds the blast radius (checked via HEAD Content-Length before the read).
+    ingest_bytes_cap: int = 1024 * 1024 * 1024  # 1 GiB
+    # Rows pulled per cursor fetch when streaming a Trino result out (export / Flight
+    # do_get). Bounds peak in-process memory to ~one batch instead of the whole result.
+    stream_batch_rows: int = 50_000
+    # Flight do_put keeps its single-commit (all-or-nothing) path until a stream exceeds
+    # this many buffered rows; past it, it flushes in chunks (multiple Iceberg commits)
+    # so a huge upload can't OOM the pod. Small uploads stay atomic.
+    doput_single_commit_max_rows: int = 1_000_000
 
     # Tenancy. How an incoming caller becomes an internal tenant namespace. One seam,
     # four presets (tenant_mode); the same rule applies to both the proxy-header path and

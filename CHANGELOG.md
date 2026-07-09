@@ -4,6 +4,33 @@ All notable changes to Memcove are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 semantic versioning once it reaches 1.0.
 
+## [0.11.0] - 2026-07-09
+
+### Changed
+- **The data plane no longer buffers large payloads in the pod.** Every "large" path used to
+  fully materialize in the control-plane process (risking an OOM); each now bounds peak memory
+  to ~one batch:
+  - **Export** streams the Trino cursor batch-by-batch straight into a single S3 object via a
+    multipart write, instead of building the whole (up to `export_row_cap`) result as an Arrow
+    table and serializing it in memory (JSON was triply resident). The one-file →
+    one-presigned-URL contract is unchanged.
+  - **Flight `DoGet`** returns a `GeneratorStream` sourced from the cursor rather than
+    materializing the whole result and wrapping it in a `RecordBatchStream`; `get_flight_info`
+    now describes the schema with a `LIMIT 0` probe instead of executing the full query a
+    second time.
+  - **Flight `DoPut`** commits in a single Iceberg commit while an upload stays under
+    `MEMCOVE_DOPUT_SINGLE_COMMIT_MAX_ROWS` (small uploads stay atomic), then flushes in chunks
+    past that so a huge upload can't buffer whole — at the cost of a partial table if the
+    stream fails mid-way.
+  - A shared `trino_client.stream_arrow_batches` powers the streaming reads (export + DoGet).
+
+### Added
+- **Ingest size guard** — `s3_parquet` and `upload_handle` ingest now reject an object larger
+  than `MEMCOVE_INGEST_BYTES_CAP` (default 1 GiB) via a cheap HEAD before reading it into the
+  pod; previously only inline payloads were capped.
+- New settings: `MEMCOVE_INGEST_BYTES_CAP`, `MEMCOVE_STREAM_BATCH_ROWS` (default 50,000), and
+  `MEMCOVE_DOPUT_SINGLE_COMMIT_MAX_ROWS` (default 1,000,000).
+
 ## [0.10.0] - 2026-07-07
 
 ### Added

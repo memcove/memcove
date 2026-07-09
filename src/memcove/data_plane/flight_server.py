@@ -18,8 +18,10 @@ Run standalone:  ``memcove-flight``  (or ``python -m memcove.data_plane.flight_s
 Security: tickets/descriptors are HMAC-signed and short-lived (see tickets.sign /
 tickets.verify + flight_ticket_secret); a client cannot forge one for another
 tenant, and serve() warns if the signing secret is left at its insecure default.
-Memory note: DoPut currently buffers the stream server-side before the Iceberg
-commit; incremental per-batch commits are a future optimization.
+Memory note: DoPut commits in a single Iceberg commit while an upload stays under
+``doput_single_commit_max_rows`` (small uploads stay atomic); past that it flushes
+in chunks (multiple commits) so a large upload can't buffer whole in the pod — at
+the cost of a partial table if the stream fails mid-way.
 """
 
 from __future__ import annotations
@@ -48,7 +50,8 @@ class MemcoveFlightServer(fl.FlightServerBase):
 
     # -- DoGet: stream a dataset / query result out ---------------------------
 
-    def _result_table(self, cmd: dict) -> pa.Table:
+    def _validated_query(self, cmd: dict) -> tuple[str, str]:
+        """Resolve a read/query DoGet command to ``(tenant, guarded_sql)``."""
         settings = get_settings()
         tenant = normalize_tenant(cmd.get("tenant"))
         op = cmd.get("op")
@@ -65,26 +68,32 @@ class MemcoveFlightServer(fl.FlightServerBase):
             )
         else:
             raise fl.FlightError(f"unsupported DoGet op {op!r}")
-        return trino_client.execute_arrow(guard.sql, run_as=tenant)
+        return tenant, guard.sql
 
     def do_get(self, context, ticket: fl.Ticket):
         try:
             cmd = tickets.verify(ticket.ticket)
-            table = self._result_table(cmd)
+            tenant, sql = self._validated_query(cmd)
+            # Stream batches straight from the Trino cursor; the whole result is never
+            # resident in the pod (unlike the old execute_arrow + RecordBatchStream).
+            schema, batches = trino_client.stream_arrow_batches(sql, run_as=tenant)
         except Exception as exc:  # noqa: BLE001
             raise fl.FlightError(str(exc)) from exc
-        return fl.RecordBatchStream(table)
+        return fl.GeneratorStream(schema, batches)
 
     def get_flight_info(self, context, descriptor: fl.FlightDescriptor):
         cmd = tickets.verify(descriptor.command)
-        table = self._result_table(cmd)
+        tenant, sql = self._validated_query(cmd)
+        # Schema only (LIMIT 0) — do NOT run the full query here just to count rows.
+        schema = trino_client.result_schema(sql, run_as=tenant)
         endpoint = fl.FlightEndpoint(
             # Re-issue a SIGNED ticket — do_get verifies signatures and would reject
             # an unsigned one, breaking the get_flight_info -> do_get handshake.
             fl.Ticket(tickets.sign(cmd)),
             [fl.Location.for_grpc_tcp("localhost", get_settings().flight_port)],
         )
-        return fl.FlightInfo(table.schema, descriptor, [endpoint], table.num_rows, table.nbytes)
+        # Row/byte totals are unknown without executing the query; -1 signals unknown.
+        return fl.FlightInfo(schema, descriptor, [endpoint], -1, -1)
 
     # -- DoPut: stream batches into a dataset ---------------------------------
 
@@ -96,9 +105,45 @@ class MemcoveFlightServer(fl.FlightServerBase):
         name = validate_label(cmd["name"])
         mode = cmd.get("mode", "create")
 
-        # Buffer the streamed batches, then write once (single Iceberg commit).
-        table = reader.read_all()
-        rows = catalog.write_arrow(tenant, name, table, mode=mode)
+        # Hybrid commit: buffer batches and, while the upload stays under the
+        # threshold, write once at the end (single Iceberg commit, all-or-nothing —
+        # the common small-upload case). Only once a stream crosses the threshold do
+        # we flush in chunks so a huge upload can't buffer the whole thing in the pod;
+        # the first flush uses the requested mode, later flushes append so earlier
+        # chunks aren't overwritten. Trade-off: an over-threshold upload becomes
+        # multi-commit, so a mid-stream failure can leave a partially-written table.
+        threshold = get_settings().doput_single_commit_max_rows
+        buffer: list[pa.RecordBatch] = []
+        buffered = 0
+        total = 0
+        commits = 0
+
+        def _flush() -> None:
+            nonlocal buffer, buffered, commits
+            if not buffer:
+                return
+            table = pa.Table.from_batches(buffer)
+            catalog.write_arrow(tenant, name, table, mode=(mode if commits == 0 else "append"))
+            commits += 1
+            buffer = []
+            buffered = 0
+
+        for chunk in reader:
+            batch = chunk.data
+            if batch is None or batch.num_rows == 0:
+                continue
+            buffer.append(batch)
+            buffered += batch.num_rows
+            total += batch.num_rows
+            if buffered >= threshold:
+                _flush()
+        _flush()
+
+        if commits == 0:
+            # Empty upload: create a zero-row table with the stream's schema so the
+            # dataset still exists (matches the old read_all() behavior).
+            catalog.write_arrow(tenant, name, reader.schema.empty_table(), mode=mode)
+
         ok = registry.record_object_guarded(
             tenant,
             name,
@@ -109,8 +154,8 @@ class MemcoveFlightServer(fl.FlightServerBase):
         # Data is committed either way; on a registry failure the guarded write has
         # already logged the drift signal for the reconciler / read-repair to backfill.
         logger.info(
-            "flight ingest: %s.%s += %d rows (mode=%s, metadata_pending=%s)",
-            tenant, name, rows, mode, not ok,
+            "flight ingest: %s.%s += %d rows (mode=%s, commits=%d, metadata_pending=%s)",
+            tenant, name, total, mode, max(commits, 1), not ok,
         )
 
 

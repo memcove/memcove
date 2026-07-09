@@ -78,9 +78,20 @@ Getting a source in (pick by size):
     remember_dataset(source={"kind":"upload_handle",...})
   • huge / continuous: open_ingest_stream (Arrow Flight; bytes bypass this channel)
 
-Reference your own datasets by bare name (`SELECT * FROM my_dataset`); reference-
-plane tables by qualified name (`ref_market.prices`). Your datasets are private
-to you.
+Durable or fast? Every write takes target="lakehouse" (default) or "scratch":
+  • lakehouse — durable, with lineage; survives across sessions and agents. Use
+    it for anything you or another agent may want later, and for s3_parquet /
+    upload / stream sources.
+  • scratch — the fast, ephemeral scratchpad (small, inline sources only). Reach
+    for it when you just need to compute over session-scoped, throwaway rows —
+    stash a small table, join or roll it up a few times, discard it. It needs no
+    server-side S3 credentials, so it's also the fallback when durable writes are
+    unavailable. remember_dataset and derive_dataset both accept target="scratch".
+
+Reference your own lakehouse datasets by bare name (`SELECT * FROM my_dataset`),
+scratch datasets as `scratch.<name>`, and reference-plane tables by qualified
+name (`ref_market.prices`) — you can join across all three in one query. Your
+datasets are private to you.
 
 Limits & failures: durable writes need server-side S3 credentials; inline
 payloads are size-capped (go S3/upload above it); s3_parquet works only for

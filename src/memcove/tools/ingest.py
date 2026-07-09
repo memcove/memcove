@@ -85,6 +85,22 @@ def _check_s3_ingest_allowed(uri: str, settings) -> None:
         )
 
 
+def _check_ingest_size(uri_or_bucket: str, key: str | None, settings) -> None:
+    """Reject an oversized S3/uploaded object BEFORE reading it into the pod.
+
+    The s3_parquet / upload_handle paths otherwise buffer the whole object in
+    process memory, so a huge object could OOM the pod. A cheap HEAD (Content-Length)
+    caps the blast radius; the inline path has its own separate cap.
+    """
+    size = storage.object_size(uri_or_bucket, key)
+    if size > settings.ingest_bytes_cap:
+        raise IngestError(
+            f"parquet object is {size} bytes, over the ingest cap "
+            f"({settings.ingest_bytes_cap} bytes); split it or raise "
+            "MEMCOVE_INGEST_BYTES_CAP"
+        )
+
+
 def _table_from_source(source: dict, tenant: str) -> tuple[pa.Table, SourceKind, str | None]:
     """Resolve an ingest source descriptor into (arrow_table, source_kind, ref)."""
     kind = source.get("kind")
@@ -108,6 +124,7 @@ def _table_from_source(source: dict, tenant: str) -> tuple[pa.Table, SourceKind,
     if kind == "s3_parquet":
         uri = source["uri"]
         _check_s3_ingest_allowed(uri, settings)
+        _check_ingest_size(uri, None, settings)
         table = storage.read_parquet_table(uri)
         return table, SourceKind.S3_PARQUET, uri
 
@@ -120,6 +137,7 @@ def _table_from_source(source: dict, tenant: str) -> tuple[pa.Table, SourceKind,
         bucket, expected = storage.resolve(settings.staging_bucket, "uploads", tenant)
         if not handle.startswith(expected + "/"):
             raise IngestError("upload handle does not belong to this tenant")
+        _check_ingest_size(bucket, handle, settings)
         table = storage.read_parquet_table(bucket, handle)
         return table, SourceKind.UPLOAD, handle
 

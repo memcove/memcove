@@ -11,6 +11,7 @@ from functools import lru_cache
 
 import boto3
 import pyarrow as pa
+import pyarrow.fs as pafs
 import pyarrow.parquet as pq
 from botocore.client import Config
 
@@ -34,6 +35,50 @@ def _client():
     if creds:
         kwargs["aws_access_key_id"], kwargs["aws_secret_access_key"] = creds
     return boto3.client("s3", **kwargs)
+
+
+@lru_cache
+def _pa_s3fs() -> pafs.S3FileSystem:
+    """A PyArrow S3 filesystem mirroring the boto3 client's config.
+
+    Used for streaming writes: ``open_output_stream`` returns a handle that flushes
+    to S3 via multipart under the hood, so a large export never sits fully in RAM.
+    Static keys only when set; otherwise PyArrow uses the AWS default credential
+    chain (IRSA / instance profile / env / STS), same as the boto3 client.
+    """
+    s = get_settings()
+    scheme = "http" if s.s3_endpoint.startswith("http://") else "https"
+    endpoint = s.s3_endpoint.split("://", 1)[-1]
+    kwargs: dict = dict(
+        endpoint_override=endpoint,
+        region=s.s3_region,
+        scheme=scheme,
+        # MinIO / path-style needs virtual addressing OFF; AWS with a real bucket is fine either way.
+        force_virtual_addressing=not s.s3_path_style,
+    )
+    creds = s.static_s3_credentials()
+    if creds:
+        kwargs["access_key"], kwargs["secret_key"] = creds
+    return pafs.S3FileSystem(**kwargs)
+
+
+def open_output_stream(bucket: str, key: str):
+    """Open a streaming write handle to ``bucket/key`` (multipart under the hood).
+
+    Write Arrow batches / bytes to it incrementally instead of building the whole
+    object in memory. Caller is responsible for closing it (use a ``with`` block).
+    """
+    return _pa_s3fs().open_output_stream(f"{bucket}/{key}")
+
+
+def object_size(uri_or_bucket: str, key: str | None = None) -> int:
+    """Content-Length of an S3 object, via a HEAD (no body download).
+
+    Accepts ``object_size("s3://bucket/key")`` or ``object_size(bucket, key)``.
+    Used to size-guard ingest before reading the whole object into the pod.
+    """
+    bucket, obj_key = _split(uri_or_bucket, key)
+    return int(head(bucket, obj_key)["ContentLength"])
 
 
 def _settings() -> Settings:

@@ -181,6 +181,25 @@ def execute_arrow(sql: str, run_as: str | None = None) -> pa.Table:
     return pa.Table.from_batches(list(batches), schema=schema)
 
 
+def result_schema(sql: str, run_as: str | None = None) -> pa.Schema:
+    """The Arrow schema of a query's result, without fetching any rows.
+
+    Runs the query wrapped in ``LIMIT 0`` so metadata (e.g. Flight ``get_flight_info``)
+    is cheap and never materializes the result. Closes its own connection.
+    """
+    conn = _connect(run_as)
+    try:
+        cur = conn.cursor()
+        cur.execute(f"SELECT * FROM (\n{sql}\n) AS _s LIMIT 0")
+        cur.fetchall()  # drain the (empty) result so the statement completes
+        description = cur.description or []
+        return pa.schema(
+            [pa.field(d[0], _arrow_type_from_trino(d[1])) for d in description]
+        )
+    finally:
+        conn.close()
+
+
 def execute_update(sql: str, run_as: str | None = None) -> None:
     """Run a DDL/CTAS statement, draining the result so it actually executes."""
     with _connect(run_as) as conn:

@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import logging
 
-import pyarrow as pa
 import pyarrow.flight as fl
 
 from memcove.core import catalog, registry, trino_client
@@ -48,7 +47,8 @@ class MemcoveFlightServer(fl.FlightServerBase):
 
     # -- DoGet: stream a dataset / query result out ---------------------------
 
-    def _result_table(self, cmd: dict) -> pa.Table:
+    def _validated_query(self, cmd: dict) -> tuple[str, str]:
+        """Resolve a read/query DoGet command to ``(tenant, guarded_sql)``."""
         settings = get_settings()
         tenant = normalize_tenant(cmd.get("tenant"))
         op = cmd.get("op")
@@ -65,26 +65,32 @@ class MemcoveFlightServer(fl.FlightServerBase):
             )
         else:
             raise fl.FlightError(f"unsupported DoGet op {op!r}")
-        return trino_client.execute_arrow(guard.sql, run_as=tenant)
+        return tenant, guard.sql
 
     def do_get(self, context, ticket: fl.Ticket):
         try:
             cmd = tickets.verify(ticket.ticket)
-            table = self._result_table(cmd)
+            tenant, sql = self._validated_query(cmd)
+            # Stream batches straight from the Trino cursor; the whole result is never
+            # resident in the pod (unlike the old execute_arrow + RecordBatchStream).
+            schema, batches = trino_client.stream_arrow_batches(sql, run_as=tenant)
         except Exception as exc:  # noqa: BLE001
             raise fl.FlightError(str(exc)) from exc
-        return fl.RecordBatchStream(table)
+        return fl.GeneratorStream(schema, batches)
 
     def get_flight_info(self, context, descriptor: fl.FlightDescriptor):
         cmd = tickets.verify(descriptor.command)
-        table = self._result_table(cmd)
+        tenant, sql = self._validated_query(cmd)
+        # Schema only (LIMIT 0) — do NOT run the full query here just to count rows.
+        schema = trino_client.result_schema(sql, run_as=tenant)
         endpoint = fl.FlightEndpoint(
             # Re-issue a SIGNED ticket — do_get verifies signatures and would reject
             # an unsigned one, breaking the get_flight_info -> do_get handshake.
             fl.Ticket(tickets.sign(cmd)),
             [fl.Location.for_grpc_tcp("localhost", get_settings().flight_port)],
         )
-        return fl.FlightInfo(table.schema, descriptor, [endpoint], table.num_rows, table.nbytes)
+        # Row/byte totals are unknown without executing the query; -1 signals unknown.
+        return fl.FlightInfo(schema, descriptor, [endpoint], -1, -1)
 
     # -- DoPut: stream batches into a dataset ---------------------------------
 

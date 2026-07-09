@@ -35,48 +35,70 @@ from memcove.tools import query as query_tool
 logger = logging.getLogger("memcove")
 
 INSTRUCTIONS = """\
-Memcove is your cross-source join engine and persistent data memory. When two
-tools or sources can't see each other, land both here as named datasets and join
-them in one SQL query. Datasets survive across turns and agents, so you compute
-over stored tables with SQL instead of holding data in the conversation.
+Memcove is the data plane your structured datasets live and compute on, driven
+over MCP. It's where an agent ingests tables from systems that can't reach each
+other, runs exact SQL over them at any scale, and keeps the results — while the
+bytes stay out of your context. You work by name and get back previews, counts,
+and download links, never the rows themselves.
 
-Reach for Memcove when:
-  • you must JOIN or AGGREGATE across sources that can't query each other
-  • one tool's output has to be matched against another tool's output
-  • a result is worth reusing across turns/agents (don't re-fetch or re-paste it)
-For a value you need only once, compute it and move on — don't persist it.
+What the plane is for — reach for it whenever any of these fits:
+  • COMPUTE AT SCALE — you're about to total, join, dedup, or GROUP BY more than
+    a handful of rows. Don't do it in your head or by reading rows: that is
+    non-deterministic and you WILL miscount and drop rows. Land them; SQL returns
+    the exact answer over thousands to billions of rows, run off in the engine.
+  • CROSS-SYSTEM — you need data from systems that can't see each other in one
+    place: a tool's output, a Postgres/warehouse UNLOAD, an s3:// parquet file,
+    shared reference data. Ingest each as a named dataset and join across them in
+    one query, whatever engine each came from.
+  • PERSIST — a dataset is worth keeping. You fetched or computed it and will
+    want it again later this turn, in a later session, or from another agent.
+    Store it once and reuse by name instead of re-fetching or re-pasting.
+  • REPRODUCIBLE + LINEAGE — the result has to be auditable or repeatable. The
+    same SQL over the same inputs yields the same rows every time, and
+    derive_dataset records lineage, so any rollup can be traced to its inputs and
+    rebuilt exactly.
+  • SCRATCHPAD — you just need to process small structured data fast. Drop a few
+    rows into the scratch plane inline and immediately join, filter, or aggregate
+    them, no durable setup and no S3 needed.
+  • DON'T PASTE — you're about to put a large table in your reply, or a result is
+    too big for context. Land it and hand back a preview or a download link.
 
-Discover first (safe opening move; also confirms the backend is reachable):
-  1. list_memory — what datasets do you already have? (avoids re-ingesting)
-  2. discover_reference_data — the source may already live in shared reference
-     data (e.g. ref_market.*), so you can join it without shuttling anything in
-Then bring in what's missing and compute:
-  3. remember_dataset — land external data as a named dataset (recipe below)
-  4. query_memory — join / filter / aggregate across all of them with SQL
-  5. derive_dataset — save a computed join/rollup, with lineage, to reuse
-  6. export_dataset — hand the user a downloadable file
+Not for: prose, notes, decisions, or semantic recall over documents — that's
+RAG's job, and Memcove sits alongside it, not in place of it. Not for a single
+scalar or a table you glance at once. The test is exact or large computation, a
+cross-system join, reuse, or a reproducible result — not merely "some data."
 
-Getting a source IN (the bridge):
-  • small (within the inline cap): remember_dataset(source={"kind":"inline",...})
-  • large extract: have the source UNLOAD/export parquet to S3, then
-    remember_dataset(source={"kind":"s3_parquet","uri":"s3://…"})
-  • a parquet file in hand: start_large_upload -> PUT the file ->
-    remember_dataset(source={"kind":"upload_handle",...})
+Once you've decided:
+  1. list_memory / discover_reference_data — what you already have, plus shared
+     read-only reference schemas (e.g. ref_market.*) you can join without importing.
+  2. remember_dataset — land what's missing as a named dataset (kinds below).
+  3. query_memory — join / filter / aggregate with read-only SQL, capped preview.
+  4. derive_dataset — persist a computed table with lineage, to reuse.
+  5. inspect_dataset — schema, source, tags, row count, and lineage of a dataset.
+  6. export_dataset — materialize to a downloadable file for the user.
+
+Getting data in — remember_dataset by source kind, into target="lakehouse"
+(durable, default) or target="scratch" (fast, ephemeral):
+  • small: source={"kind":"inline",...} — the only kind scratch accepts
+  • large extract: UNLOAD/export parquet to S3, then {"kind":"s3_parquet","uri":"s3://…"}
+  • parquet in hand: start_large_upload -> PUT it -> {"kind":"upload_handle",...}
   • huge / continuous: open_ingest_stream (Arrow Flight; bytes bypass this channel)
+lakehouse persists across sessions and agents with lineage; scratch is for small
+inline tables you join or roll up then discard, and needs no S3 credentials (so
+it's also the fallback when durable writes are down). derive_dataset also takes
+target="scratch".
 
-Prerequisites & limits: durable writes need server-side S3 credentials; inline
-payloads are size-capped (go S3/upload above it); s3_parquet ingest works only
-for operator-allowlisted buckets; the fast scratch plane (target="scratch") is
-off unless the operator enabled it; reference schemas are read-only.
+Reference lakehouse datasets by bare name (`SELECT * FROM my_dataset`), scratch
+as `scratch.<name>`, and reference tables by qualified name (`ref_market.prices`)
+— you can join across all three in one query. Your datasets are private to you.
 
-If a write fails: a credential/access error is the server-side S3 backend, not
-your call — fall back to target="scratch" or a smaller inline payload. If every
-write path fails, tell the user Memcove is unavailable and finish the task another
-way rather than retrying blindly.
-
-Reference your datasets by bare name (`SELECT * FROM my_dataset`) and reference-
-plane tables by qualified name (`ref_market.prices`). Your datasets are private
-to you. Prefer joining in Memcove over pasting large tables into the conversation."""
+Limits & failures: durable writes need server-side S3 credentials; inline
+payloads are size-capped (go S3/upload above it); s3_parquet works only for
+operator-allowlisted buckets; the scratch plane and reference schemas depend on
+operator config; reference schemas are read-only. A credential or access error
+on write is the S3 backend, not your call — fall back to target="scratch" or a
+smaller inline payload. If every write path fails, tell the user Memcove is
+unavailable and finish the task another way rather than retrying blindly."""
 
 settings = get_settings()
 

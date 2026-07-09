@@ -35,48 +35,61 @@ from memcove.tools import query as query_tool
 logger = logging.getLogger("memcove")
 
 INSTRUCTIONS = """\
-Memcove is your cross-source join engine and persistent data memory. When two
-tools or sources can't see each other, land both here as named datasets and join
-them in one SQL query. Datasets survive across turns and agents, so you compute
-over stored tables with SQL instead of holding data in the conversation.
+Memcove is durable, queryable memory for datasets: a lakehouse you drive over
+MCP. Store rows under a name and compute over them with SQL — joins, GROUP BY,
+filters over thousands to billions of rows — instead of holding data in your
+context or doing the math in your head. The data stays out of the conversation;
+you work by name and get back previews, counts, and download links.
 
-Reach for Memcove when:
-  • you must JOIN or AGGREGATE across sources that can't query each other
-  • one tool's output has to be matched against another tool's output
-  • a result is worth reusing across turns/agents (don't re-fetch or re-paste it)
-For a value you need only once, compute it and move on — don't persist it.
+Reach for Memcove the moment data outgrows the conversation — concretely, when:
+  • You need an EXACT aggregate — SUM, COUNT, GROUP BY, dedup, top-N, a join's
+    row count — over more than a handful of rows. Do NOT total, join, or dedup
+    rows in your head or by reading them: you will miscount, drop rows, and
+    invent numbers. Land the rows and let SQL compute the answer.
+  • You must COMBINE two sources that can't see each other — one tool's output
+    matched against another's, or against shared reference data. Store both,
+    join in one query.
+  • A dataset is worth KEEPING — you fetched or computed it and will need it
+    again this turn, a later turn, or from another agent. Store it once instead
+    of re-fetching or re-pasting it.
+  • You're about to paste a LARGE table into your reply, or a result is too big
+    for context. Land it and hand back a preview or a download link instead.
 
-Discover first (safe opening move; also confirms the backend is reachable):
-  1. list_memory — what datasets do you already have? (avoids re-ingesting)
-  2. discover_reference_data — the source may already live in shared reference
-     data (e.g. ref_market.*), so you can join it without shuttling anything in
-Then bring in what's missing and compute:
-  3. remember_dataset — land external data as a named dataset (recipe below)
-  4. query_memory — join / filter / aggregate across all of them with SQL
-  5. derive_dataset — save a computed join/rollup, with lineage, to reuse
-  6. export_dataset — hand the user a downloadable file
+Not for: prose, notes, decisions, or semantic recall over documents — that is
+RAG's job, and Memcove sits alongside it, not in place of it. Not for a single
+scalar or a throwaway three-row table you use once — compute it inline and move
+on. The test is exact computation, reuse, or scale — not merely "some data."
 
-Getting a source IN (the bridge):
+Once you've decided, the loop:
+  1. list_memory / discover_reference_data — see what you already have; the
+     source may already live in shared reference schemas (e.g. ref_market.*),
+     so you can join it without importing anything.
+  2. remember_dataset — land what's missing as a named dataset (bridge below).
+  3. query_memory — join / filter / aggregate across all of them with read-only
+     SQL, capped preview.
+  4. derive_dataset — persist a computed join or rollup, with lineage, to reuse.
+  5. export_dataset — materialize to a downloadable file for the user.
+
+Getting a source in (pick by size):
   • small (within the inline cap): remember_dataset(source={"kind":"inline",...})
   • large extract: have the source UNLOAD/export parquet to S3, then
     remember_dataset(source={"kind":"s3_parquet","uri":"s3://…"})
-  • a parquet file in hand: start_large_upload -> PUT the file ->
+  • a parquet file in hand: start_large_upload -> PUT it ->
     remember_dataset(source={"kind":"upload_handle",...})
   • huge / continuous: open_ingest_stream (Arrow Flight; bytes bypass this channel)
 
-Prerequisites & limits: durable writes need server-side S3 credentials; inline
-payloads are size-capped (go S3/upload above it); s3_parquet ingest works only
-for operator-allowlisted buckets; the fast scratch plane (target="scratch") is
-off unless the operator enabled it; reference schemas are read-only.
-
-If a write fails: a credential/access error is the server-side S3 backend, not
-your call — fall back to target="scratch" or a smaller inline payload. If every
-write path fails, tell the user Memcove is unavailable and finish the task another
-way rather than retrying blindly.
-
-Reference your datasets by bare name (`SELECT * FROM my_dataset`) and reference-
+Reference your own datasets by bare name (`SELECT * FROM my_dataset`); reference-
 plane tables by qualified name (`ref_market.prices`). Your datasets are private
-to you. Prefer joining in Memcove over pasting large tables into the conversation."""
+to you.
+
+Limits & failures: durable writes need server-side S3 credentials; inline
+payloads are size-capped (go S3/upload above it); s3_parquet works only for
+operator-allowlisted buckets; the scratch plane (target="scratch") and reference
+schemas depend on operator config; reference schemas are read-only. A credential
+or access error on write is the S3 backend, not your call — fall back to
+target="scratch" or a smaller inline payload. If every write path fails, tell the
+user Memcove is unavailable and finish the task another way rather than retrying
+blindly."""
 
 settings = get_settings()
 

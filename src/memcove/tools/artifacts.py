@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import io
 import uuid
 
 import orjson
 import pyarrow.csv as pacsv
+import pyarrow.parquet as pq
 
 from memcove.core import storage, trino_client
 from memcove.core.audit import audit
@@ -42,32 +42,68 @@ def export_artifact(
     )
 
     capped = f"SELECT * FROM (\n{guard.sql}\n) AS _e LIMIT {settings.export_row_cap}"
-    table = trino_client.execute_arrow(capped, run_as=tenant)
+    # Stream the cursor batch-by-batch straight into a single object in S3, so peak
+    # memory is ~one batch instead of the whole (up to export_row_cap-row) result.
+    schema, batches = trino_client.stream_arrow_batches(capped, run_as=tenant)
 
     bucket, key = storage.resolve(
         settings.artifacts_bucket, "exports", tenant, f"{base}-{uuid.uuid4().hex}.{_EXT[fmt]}"
     )
 
     if fmt == "parquet":
-        size = storage.write_parquet_table(table, bucket, key)
-        content_type = "application/vnd.apache.parquet"
+        row_count = _stream_parquet(bucket, key, schema, batches)
     elif fmt == "csv":
-        buf = io.BytesIO()
-        pacsv.write_csv(table, buf)
-        size = storage.write_bytes(bucket, key, buf.getvalue(), "text/csv")
-        content_type = "text/csv"
+        row_count = _stream_csv(bucket, key, schema, batches)
     else:  # json
-        payload = orjson.dumps(table.to_pylist(), default=str)
-        size = storage.write_bytes(bucket, key, payload, "application/json")
-        content_type = "application/json"
+        row_count = _stream_json(bucket, key, batches)
 
-    _ = content_type  # reserved for future metadata
-    audit("export", tenant=tenant, fmt=fmt, rows=table.num_rows, key=key)
+    size = storage.object_size(bucket, key)
+    audit("export", tenant=tenant, fmt=fmt, rows=row_count, key=key)
     return ArtifactRef(
         uri=storage.s3_uri(bucket, key),
         presigned_url=storage.presign_get(bucket, key),
         format=fmt,
-        row_count=table.num_rows,
+        row_count=row_count,
         size_bytes=size,
         expires_in_seconds=settings.presign_ttl_seconds,
     )
+
+
+def _stream_parquet(bucket, key, schema, batches) -> int:
+    row_count = 0
+    with storage.open_output_stream(bucket, key) as sink, pq.ParquetWriter(sink, schema) as w:
+        for b in batches:
+            w.write_batch(b)
+            row_count += b.num_rows
+    return row_count
+
+
+def _stream_csv(bucket, key, schema, batches) -> int:
+    row_count = 0
+    with storage.open_output_stream(bucket, key) as sink:
+        # CSVWriter emits the header on construction, so a zero-row export still
+        # yields a valid header-only file.
+        writer = pacsv.CSVWriter(sink, schema)
+        try:
+            for b in batches:
+                writer.write_batch(b)
+                row_count += b.num_rows
+        finally:
+            writer.close()
+    return row_count
+
+
+def _stream_json(bucket, key, batches) -> int:
+    """Stream a JSON array, one batch's rows resident at a time."""
+    row_count = 0
+    first = True
+    with storage.open_output_stream(bucket, key) as sink:
+        sink.write(b"[")
+        for b in batches:
+            inner = orjson.dumps(b.to_pylist(), default=str)[1:-1]  # strip outer [ ]
+            if inner:
+                sink.write(inner if first else b"," + inner)
+                first = False
+            row_count += b.num_rows
+        sink.write(b"]")
+    return row_count
